@@ -12,9 +12,9 @@ spec:
   selector:
     matchLabels:
       {{- include "pinglens.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: web
+      app.kubernetes.io/component: metrics
   endpoints:
-    - port: http
+    - port: metrics
       path: /metrics
       interval: {{ .Values.serviceMonitor.interval }}
       scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout }}

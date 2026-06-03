@@ -49,6 +49,12 @@ service:
   loadBalancerIP: ""
   loadBalancerSourceRanges: []
 
+metricsService:
+  enabled: true
+  type: ClusterIP
+  port: 9090
+  annotations: {}
+
 agentService:
   enabled: false
   name: agent
@@ -62,6 +68,7 @@ agentService:
 ingress:
   enabled: false
   className: ""
+  labels: {}
   annotations: {}
   hosts:
     - host: ping.l15s.com
@@ -108,6 +115,7 @@ coordinator:
   replicaCount: 1
   affinity: {}
   listen: ":8080"
+  metricsListen: ":9090"
   regions: []
   pingCount: 0
   pingInterval: 1s

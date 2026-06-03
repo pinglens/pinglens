@@ -21,6 +21,7 @@ data:
   PINGLENS_BRAND_URL: {{ .Values.branding.providerURL | quote }}
   PINGLENS_BRAND_LOGO_URL: {{ .Values.branding.providerLogoURL | quote }}
   PINGLENS_LISTEN: {{ .Values.coordinator.listen | quote }}
+  PINGLENS_METRICS_LISTEN: {{ .Values.coordinator.metricsListen | quote }}
   PINGLENS_REGIONS: {{ join "," .Values.coordinator.regions | quote }}
   PINGLENS_PING_COUNT: {{ .Values.coordinator.pingCount | quote }}
   PINGLENS_PING_INTERVAL: {{ .Values.coordinator.pingInterval | quote }}

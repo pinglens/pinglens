@@ -32,6 +32,30 @@ spec:
     app.kubernetes.io/component: coordinator
 ---
 {{- end }}
+{{- if and .Values.coordinator.enabled .Values.metricsService.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "pinglens.coordinatorFullname" . }}-metrics
+  labels:
+    {{- include "pinglens.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+  {{- with .Values.metricsService.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.metricsService.type }}
+  ports:
+    - port: {{ .Values.metricsService.port }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "pinglens.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: coordinator
+---
+{{- end }}
 {{- if and .Values.coordinator.enabled .Values.agentService.enabled -}}
 apiVersion: v1
 kind: Service
