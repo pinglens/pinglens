@@ -126,7 +126,7 @@ async function cancelCurrentJob(reason) {
 }
 
 async function startTest(value, updateURL) {
-  message.textContent = 'Starting test…';
+  message.textContent = 'Starting test...';
   resultsBody.innerHTML = '';
   rows = new Map();
   await cancelCurrentJob();
@@ -141,7 +141,7 @@ async function startTest(value, updateURL) {
     url.searchParams.set('target', data.target);
     window.history.replaceState({}, '', url);
   }
-  message.textContent = `Testing ${data.target}…`;
+  message.textContent = `Testing ${data.target}...`;
   currentJobID = data.job_id;
   stopJob.hidden = false;
   for (const region of data.regions) ensureRow(region);
@@ -168,7 +168,7 @@ form.addEventListener('submit', async (event) => {
 
 
 stopJob.addEventListener('click', async () => {
-  await cancelCurrentJob('Canceling test…');
+  await cancelCurrentJob('Canceling test...');
 });
 
 window.addEventListener('beforeunload', () => {
