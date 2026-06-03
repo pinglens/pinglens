@@ -70,11 +70,7 @@ ingress:
   className: ""
   labels: {}
   annotations: {}
-  hosts:
-    - host: ping.l15s.com
-      paths:
-        - path: /
-          pathType: Prefix
+  hosts: []
   tls: []
 
 serviceMonitor:

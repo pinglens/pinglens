@@ -1,7 +1,7 @@
 apiVersion: v2
 name: pinglens
 description: PingLens regional ping and MTR-style path testing service
-version: 0.4.5
+version: 0.4.6
 appVersion: "0.4.0"
 type: application
 dependencies:
