@@ -204,6 +204,48 @@ func TestAgentOnlineAndTimeoutLogged(t *testing.T) {
 	}
 }
 
+func TestMetricsOnlyServedByMetricsHandler(t *testing.T) {
+	srv := newTestServer(t, Config{AgentTokens: map[string]string{"dfw1": "secret"}, AgentPollTimeout: time.Millisecond})
+	publicReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	publicResp := httptest.NewRecorder()
+	srv.ServeHTTP(publicResp, publicReq)
+	if publicResp.Code == http.StatusOK {
+		t.Fatalf("public listener served metrics")
+	}
+	for _, instanceID := range []string{"pod-a", "pod-b"} {
+		body, _ := json.Marshal(protocol.AgentPollRequest{ClusterID: "dfw1", InstanceID: instanceID, DisplayName: "DFW", Version: protocol.Version})
+		req := httptest.NewRequest(http.MethodPost, "/api/agent/poll", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer secret")
+		resp := httptest.NewRecorder()
+		srv.ServeHTTP(resp, req)
+		if resp.Code != http.StatusOK {
+			t.Fatalf("poll failed: %d %s", resp.Code, resp.Body.String())
+		}
+	}
+	if code := createJob(t, srv, "example.com", "198.51.100.55:12345"); code != http.StatusAccepted {
+		t.Fatalf("create got %d", code)
+	}
+	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsResp := httptest.NewRecorder()
+	srv.MetricsHandler().ServeHTTP(metricsResp, metricsReq)
+	if metricsResp.Code != http.StatusOK {
+		t.Fatalf("metrics failed: %d %s", metricsResp.Code, metricsResp.Body.String())
+	}
+	output := metricsResp.Body.String()
+	for _, want := range []string{
+		"pinglens_agent_ids_online 1",
+		"pinglens_agent_instances_online 2",
+		"pinglens_agent_instances{agent_id=\"dfw1\"} 2",
+		"pinglens_sessions_active 1",
+		"pinglens_sessions_active_unique_clients 1",
+		"pinglens_sessions_active_unique_targets 1",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("missing metric %q in:\n%s", want, output)
+		}
+	}
+}
+
 func TestConcurrencyLimits(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -6,6 +6,7 @@ const Version = "v1"
 
 type AgentPollRequest struct {
 	ClusterID   string `json:"cluster_id"`
+	InstanceID  string `json:"instance_id,omitempty"`
 	DisplayName string `json:"display_name,omitempty"`
 	Version     string `json:"version"`
 }
@@ -52,16 +53,17 @@ type RegionsResponse struct {
 }
 
 type AgentEvent struct {
-	JobID     string       `json:"job_id"`
-	ClusterID string       `json:"cluster_id"`
-	Type      string       `json:"type"`
-	At        time.Time    `json:"at"`
-	Target    string       `json:"target,omitempty"`
-	Resolved  string       `json:"resolved,omitempty"`
-	Ping      *PingResult  `json:"ping,omitempty"`
-	Summary   *PingSummary `json:"summary,omitempty"`
-	Trace     *TraceReport `json:"trace,omitempty"`
-	Error     string       `json:"error,omitempty"`
+	JobID      string       `json:"job_id"`
+	ClusterID  string       `json:"cluster_id"`
+	InstanceID string       `json:"instance_id,omitempty"`
+	Type       string       `json:"type"`
+	At         time.Time    `json:"at"`
+	Target     string       `json:"target,omitempty"`
+	Resolved   string       `json:"resolved,omitempty"`
+	Ping       *PingResult  `json:"ping,omitempty"`
+	Summary    *PingSummary `json:"summary,omitempty"`
+	Trace      *TraceReport `json:"trace,omitempty"`
+	Error      string       `json:"error,omitempty"`
 }
 
 type PingResult struct {

@@ -3,6 +3,8 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +23,7 @@ import (
 type Config struct {
 	CoordinatorURL string
 	ClusterID      string
+	InstanceID     string
 	DisplayName    string
 	Token          string
 	MTRBinary      string
@@ -35,6 +38,14 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) error {
 	if cfg.PollBackoff <= 0 {
 		cfg.PollBackoff = 2 * time.Second
 	}
+	if cfg.InstanceID == "" {
+		var err error
+		cfg.InstanceID, err = randomInstanceID()
+		if err != nil {
+			return err
+		}
+	}
+	logger = logger.With("agent", cfg.ClusterID, "agent_instance", cfg.InstanceID)
 	client := &http.Client{Timeout: 40 * time.Second}
 	for {
 		if err := ctx.Err(); err != nil {
@@ -60,7 +71,7 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) error {
 }
 
 func poll(ctx context.Context, client *http.Client, cfg Config) (*protocol.ProbeJob, error) {
-	body, err := json.Marshal(protocol.AgentPollRequest{ClusterID: cfg.ClusterID, DisplayName: cfg.DisplayName, Version: protocol.Version})
+	body, err := json.Marshal(protocol.AgentPollRequest{ClusterID: cfg.ClusterID, InstanceID: cfg.InstanceID, DisplayName: cfg.DisplayName, Version: protocol.Version})
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +95,7 @@ func executeJob(ctx context.Context, client *http.Client, cfg Config, job protoc
 	event := func(event protocol.AgentEvent) bool {
 		event.JobID = job.JobID
 		event.ClusterID = cfg.ClusterID
+		event.InstanceID = cfg.InstanceID
 		if event.At.IsZero() {
 			event.At = time.Now().UTC()
 		}
@@ -183,6 +195,14 @@ func authorize(req *http.Request, cfg Config) {
 	if cfg.UserAgent != "" {
 		req.Header.Set("User-Agent", cfg.UserAgent)
 	}
+}
+
+func randomInstanceID() (string, error) {
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw[:]), nil
 }
 
 func roundTripJSON(client *http.Client, req *http.Request, output any) error {
