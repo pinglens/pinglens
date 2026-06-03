@@ -19,7 +19,7 @@ body {
 }
 .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
 .shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0; }
-.hero, .regions-card, .results-card {
+.hero, .results-card {
   background: color-mix(in srgb, var(--panel) 92%, transparent);
   border: 1px solid var(--line);
   border-radius: 20px;
@@ -36,10 +36,6 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 button.secondary { background: transparent; border-color: var(--line); color: var(--text); padding: 8px 12px; }
 .message { min-height: 24px; color: var(--muted); }
 .card-heading { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 16px; }
-.regions { display: flex; flex-wrap: wrap; gap: 10px; }
-.region-pill { border: 1px solid var(--line); border-radius: 999px; padding: 8px 12px; color: var(--muted); }
-.region-pill.online { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
-.region-pill.offline { color: var(--bad); }
 .job-actions { display: flex; gap: 10px; align-items: center; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }

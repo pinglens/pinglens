@@ -1,7 +1,6 @@
 const form = document.querySelector('#probe-form');
 const target = document.querySelector('#target');
 const message = document.querySelector('#message');
-const regionsBox = document.querySelector('#regions');
 const resultsBody = document.querySelector('#results');
 const stopJob = document.querySelector('#stop-job');
 let source;
@@ -22,23 +21,6 @@ function regionName(region) {
   return regionNames.get(region) || region;
 }
 
-async function loadRegions() {
-  const res = await fetch('/api/regions');
-  const data = await res.json();
-  regionsBox.innerHTML = '';
-  regionNames = new Map();
-  if (!data.regions.length) {
-    regionsBox.textContent = 'No agents online.';
-    return;
-  }
-  for (const region of data.regions) {
-    if (region.name) regionNames.set(region.id, region.name);
-    const el = document.createElement('span');
-    el.className = `region-pill ${region.online ? 'online' : 'offline'}`;
-    el.textContent = `${regionName(region)} ${region.online ? 'online' : 'offline'}`;
-    regionsBox.appendChild(el);
-  }
-}
 
 function ensureRow(region) {
   const id = typeof region === 'object' && region !== null ? region.id : region;
@@ -144,7 +126,7 @@ async function cancelCurrentJob(reason) {
 }
 
 async function startTest(value, updateURL) {
-  message.textContent = 'Starting test…';
+  message.textContent = 'Starting test...';
   resultsBody.innerHTML = '';
   rows = new Map();
   await cancelCurrentJob();
@@ -159,7 +141,7 @@ async function startTest(value, updateURL) {
     url.searchParams.set('target', data.target);
     window.history.replaceState({}, '', url);
   }
-  message.textContent = `Testing ${data.target} for up to 10 minutes`;
+  message.textContent = `Testing ${data.target}...`;
   currentJobID = data.job_id;
   stopJob.hidden = false;
   for (const region of data.regions) ensureRow(region);
@@ -186,7 +168,7 @@ form.addEventListener('submit', async (event) => {
 
 
 stopJob.addEventListener('click', async () => {
-  await cancelCurrentJob('Canceling test…');
+  await cancelCurrentJob('Canceling test...');
 });
 
 window.addEventListener('beforeunload', () => {
@@ -194,16 +176,8 @@ window.addEventListener('beforeunload', () => {
   fetch(`/api/jobs/${currentJobID}`, {method: 'DELETE', keepalive: true});
 });
 
-setInterval(() => {
-  loadRegions().catch(() => {});
-}, 15000);
-
-loadRegions()
-  .then(async () => {
-    const targetParam = new URLSearchParams(window.location.search).get('target');
-    if (targetParam) {
-      target.value = targetParam;
-      await startTest(targetParam, false);
-    }
-  })
-  .catch(err => { message.textContent = err.message; });
+const targetParam = new URLSearchParams(window.location.search).get('target');
+if (targetParam) {
+  target.value = targetParam;
+  startTest(targetParam, false).catch(err => { message.textContent = err.message; });
+}
