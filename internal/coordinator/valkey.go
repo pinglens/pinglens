@@ -81,6 +81,16 @@ hit_rate(KEYS[6], target_rate)
 return ''
 `
 
+const valkeyMarkAgentOfflineScript = `
+local last_seen = tonumber(redis.call('HGET', KEYS[1], 'last_seen_ms') or '0')
+local cutoff = tonumber(ARGV[1])
+if last_seen > 0 and last_seen <= cutoff and redis.call('HGET', KEYS[1], 'status') == 'online' then
+  redis.call('HSET', KEYS[1], 'status', 'offline', 'last_offline_ms', ARGV[2])
+  return 1
+end
+return 0
+`
+
 type valkeyStore struct {
 	client *redis.Client
 	prefix string
@@ -143,21 +153,56 @@ func (v *valkeyStore) jobTTL(cfg Config) time.Duration {
 	return ttl
 }
 
-func (v *valkeyStore) registerAgent(ctx context.Context, id string, name string, now time.Time) error {
+type agentRegistration struct {
+	id                string
+	displayName       string
+	previousLastSeen  time.Time
+	onlineTransition  bool
+	offlineTransition bool
+}
+
+func (v *valkeyStore) registerAgent(ctx context.Context, cfg Config, id string, name string, now time.Time) (agentRegistration, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return fmt.Errorf("agent id is required")
+		return agentRegistration{}, fmt.Errorf("agent id is required")
 	}
 	name = strings.TrimSpace(name)
+	fields, err := v.client.HGetAll(ctx, v.key("agent", id)).Result()
+	if err != nil {
+		return agentRegistration{}, err
+	}
+	previousName := strings.TrimSpace(fields["name"])
+	lastSeenMillis, _ := strconv.ParseInt(fields["last_seen_ms"], 10, 64)
+	var previousLastSeen time.Time
+	previousOnline := false
+	if lastSeenMillis > 0 {
+		previousLastSeen = time.UnixMilli(lastSeenMillis).UTC()
+		previousOnline = now.Sub(previousLastSeen) <= cfg.AgentOnlineTimeout
+	}
+	previousStatus := fields["status"]
+	displayName := name
+	if displayName == "" {
+		displayName = previousName
+	}
 	pipe := v.client.Pipeline()
 	pipe.SAdd(ctx, v.key("agents"), id)
+	agentKey := v.key("agent", id)
 	if name != "" {
-		pipe.HSet(ctx, v.key("agent", id), "name", name)
+		pipe.HSet(ctx, agentKey, "name", name)
 	}
-	pipe.HSet(ctx, v.key("agent", id), "last_seen_ms", now.UnixMilli())
-	pipe.Expire(ctx, v.key("agent", id), 24*time.Hour)
-	_, err := pipe.Exec(ctx)
-	return err
+	pipe.HSet(ctx, agentKey, "last_seen_ms", now.UnixMilli(), "status", "online", "last_online_ms", now.UnixMilli())
+	pipe.Expire(ctx, agentKey, 24*time.Hour)
+	_, err = pipe.Exec(ctx)
+	if err != nil {
+		return agentRegistration{}, err
+	}
+	return agentRegistration{
+		id:                id,
+		displayName:       displayName,
+		previousLastSeen:  previousLastSeen,
+		onlineTransition:  previousStatus != "online" || !previousOnline,
+		offlineTransition: previousStatus == "online" && lastSeenMillis > 0 && !previousOnline,
+	}, nil
 }
 
 func (v *valkeyStore) regionStatuses(ctx context.Context, cfg Config, now time.Time) ([]protocol.Region, error) {
@@ -179,6 +224,15 @@ func (v *valkeyStore) regionStatuses(ctx context.Context, cfg Config, now time.T
 		if lastSeenMillis > 0 {
 			region.LastSeen = time.UnixMilli(lastSeenMillis).UTC()
 			region.Online = now.Sub(region.LastSeen) <= cfg.AgentOnlineTimeout
+			if !region.Online && fields["status"] == "online" {
+				changed, err := v.client.Eval(ctx, valkeyMarkAgentOfflineScript, []string{v.key("agent", id)}, now.Add(-cfg.AgentOnlineTimeout).UnixMilli(), now.UnixMilli()).Int()
+				if err != nil {
+					return nil, err
+				}
+				if changed == 1 && v.logger != nil {
+					v.logger.Warn("agent offline", "agent", id, "display_name", region.Name, "last_seen", region.LastSeen, "reason", "timeout", "backend", "valkey")
+				}
+			}
 		}
 		regions = append(regions, region)
 	}
@@ -465,10 +519,13 @@ func (s *Server) createJobValkey(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) agentPollValkey(w http.ResponseWriter, r *http.Request, request protocol.AgentPollRequest) {
 	ctx := r.Context()
-	if err := s.store.registerAgent(ctx, request.ClusterID, request.DisplayName, time.Now().UTC()); err != nil {
+	now := time.Now().UTC()
+	registration, err := s.store.registerAgent(ctx, s.cfg, request.ClusterID, request.DisplayName, now)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	s.logAgentRegistration(registration, "poll")
 	result, err := s.store.client.BRPop(ctx, s.cfg.AgentPollTimeout, s.store.key("queue", request.ClusterID)).Result()
 	if errors.Is(err, redis.Nil) {
 		writeJSON(w, http.StatusOK, protocol.AgentPollResponse{})
@@ -501,7 +558,12 @@ func (s *Server) agentPollValkey(w http.ResponseWriter, r *http.Request, request
 
 func (s *Server) agentEventsValkey(w http.ResponseWriter, r *http.Request, event protocol.AgentEvent) {
 	ctx := r.Context()
-	_ = s.store.registerAgent(ctx, event.ClusterID, "", time.Now().UTC())
+	registration, err := s.store.registerAgent(ctx, s.cfg, event.ClusterID, "", time.Now().UTC())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.logAgentRegistration(registration, "events")
 	exists, canceled, _, err := s.store.jobStatus(ctx, event.JobID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

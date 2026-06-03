@@ -276,7 +276,10 @@ func (s *Server) agentPoll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	if !s.authorized(request.ClusterID, r.Header.Get("Authorization")) {
+	auth := s.authorizeAgent(request.ClusterID, r.Header.Get("Authorization"))
+	s.logAgentPollAttempt(r, request, auth)
+	if !auth.ok {
+		s.logRejectedAgentConnection(r, "poll", request.ClusterID, "", auth)
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
@@ -293,7 +296,9 @@ func (s *Server) agentEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	if !s.authorized(event.ClusterID, r.Header.Get("Authorization")) {
+	auth := s.authorizeAgent(event.ClusterID, r.Header.Get("Authorization"))
+	if !auth.ok {
+		s.logRejectedAgentConnection(r, "events", event.ClusterID, event.JobID, auth)
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
@@ -398,16 +403,92 @@ func (s *Server) appendEventLocked(job *jobState, event protocol.AgentEvent) {
 	}
 }
 
-func (s *Server) authorized(clusterID, authorization string) bool {
+type agentAuthorization struct {
+	ok        bool
+	reason    string
+	tokenHint string
+}
+
+func (s *Server) authorizeAgent(clusterID, authorization string) agentAuthorization {
+	clusterID = strings.TrimSpace(clusterID)
+	if clusterID == "" {
+		return agentAuthorization{reason: "missing agent id"}
+	}
 	token := s.cfg.AgentTokens[clusterID]
 	if token == "" {
-		return false
+		return agentAuthorization{reason: "unknown agent"}
 	}
 	supplied := strings.TrimPrefix(authorization, "Bearer ")
 	if supplied == authorization || supplied == "" {
-		return false
+		return agentAuthorization{reason: "missing bearer token"}
 	}
-	return subtle.ConstantTimeCompare([]byte(token), []byte(supplied)) == 1
+	if subtle.ConstantTimeCompare([]byte(token), []byte(supplied)) != 1 {
+		return agentAuthorization{reason: "invalid token", tokenHint: obfuscateSecret(supplied)}
+	}
+	return agentAuthorization{ok: true}
+}
+
+func (s *Server) logAgentPollAttempt(r *http.Request, request protocol.AgentPollRequest, auth agentAuthorization) {
+	attrs := []any{
+		"agent", strings.TrimSpace(request.ClusterID),
+		"display_name", strings.TrimSpace(request.DisplayName),
+		"remote", clientKey(r),
+		"authenticated", auth.ok,
+	}
+	if auth.reason != "" {
+		attrs = append(attrs, "reason", auth.reason)
+	}
+	if auth.tokenHint != "" {
+		attrs = append(attrs, "token_hint", auth.tokenHint)
+	}
+	s.logger.Info("agent connection attempt", attrs...)
+}
+
+func (s *Server) logRejectedAgentConnection(r *http.Request, endpoint, agentID, jobID string, auth agentAuthorization) {
+	attrs := []any{
+		"endpoint", endpoint,
+		"agent", strings.TrimSpace(agentID),
+		"remote", clientKey(r),
+		"reason", auth.reason,
+	}
+	if jobID != "" {
+		attrs = append(attrs, "job", jobID)
+	}
+	if auth.tokenHint != "" {
+		attrs = append(attrs, "token_hint", auth.tokenHint)
+	}
+	s.logger.Warn("rejected agent connection", attrs...)
+}
+
+func (s *Server) logAgentRegistration(registration agentRegistration, source string) {
+	if registration.id == "" {
+		return
+	}
+	attrs := []any{
+		"agent", registration.id,
+		"display_name", registration.displayName,
+		"source", source,
+		"backend", "valkey",
+	}
+	if !registration.previousLastSeen.IsZero() {
+		attrs = append(attrs, "previous_last_seen", registration.previousLastSeen)
+	}
+	if registration.offlineTransition {
+		offlineAttrs := append([]any{}, attrs...)
+		offlineAttrs = append(offlineAttrs, "reason", "timeout")
+		s.logger.Warn("agent offline", offlineAttrs...)
+	}
+	if registration.onlineTransition {
+		s.logger.Info("agent online", attrs...)
+	}
+}
+
+func obfuscateSecret(secret string) string {
+	secret = strings.TrimSpace(secret)
+	if len(secret) <= 8 {
+		return "****"
+	}
+	return secret[:4] + "****" + secret[len(secret)-4:]
 }
 
 func terminalEvent(eventType string) bool {
