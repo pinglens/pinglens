@@ -4,7 +4,6 @@ const message = document.querySelector('#message');
 const regionsBox = document.querySelector('#regions');
 const resultsBody = document.querySelector('#results');
 const stopJob = document.querySelector('#stop-job');
-const refreshRegions = document.querySelector('#refresh-regions');
 let source;
 let rows = new Map();
 let regionNames = new Map();
@@ -28,6 +27,10 @@ async function loadRegions() {
   const data = await res.json();
   regionsBox.innerHTML = '';
   regionNames = new Map();
+  if (!data.regions.length) {
+    regionsBox.textContent = 'No agents online.';
+    return;
+  }
   for (const region of data.regions) {
     if (region.name) regionNames.set(region.id, region.name);
     const el = document.createElement('span');
@@ -181,7 +184,6 @@ form.addEventListener('submit', async (event) => {
   await startTest(target.value, true);
 });
 
-refreshRegions.addEventListener('click', loadRegions);
 
 stopJob.addEventListener('click', async () => {
   await cancelCurrentJob('Canceling test…');
@@ -191,6 +193,10 @@ window.addEventListener('beforeunload', () => {
   if (!currentJobID) return;
   fetch(`/api/jobs/${currentJobID}`, {method: 'DELETE', keepalive: true});
 });
+
+setInterval(() => {
+  loadRegions().catch(() => {});
+}, 15000);
 
 loadRegions()
   .then(async () => {

@@ -377,13 +377,12 @@ func (s *Server) regionStatusesLocked(now time.Time) []protocol.Region {
 	regions := make([]protocol.Region, 0, len(ids))
 	for _, id := range ids {
 		state := s.agents[id]
-		region := protocol.Region{ID: id, Name: id}
-		if state != nil {
-			if state.displayName != "" {
-				region.Name = state.displayName
-			}
-			region.LastSeen = state.lastSeen
-			region.Online = now.Sub(state.lastSeen) <= s.cfg.AgentOnlineTimeout
+		if state == nil || now.Sub(state.lastSeen) > s.cfg.AgentOnlineTimeout {
+			continue
+		}
+		region := protocol.Region{ID: id, Name: id, LastSeen: state.lastSeen, Online: true}
+		if state.displayName != "" {
+			region.Name = state.displayName
 		}
 		regions = append(regions, region)
 	}
