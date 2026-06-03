@@ -1,0 +1,66 @@
+{{- if .Values.coordinator.enabled -}}
+{{- $defaultValkeyURL := "" -}}
+{{- if or (not (hasKey .Values.valkey "enabled")) .Values.valkey.enabled -}}
+{{- $defaultValkeyURL = printf "redis://%s-valkey:6379/0" (include "pinglens.fullname" .) -}}
+{{- end -}}
+{{- $stateStoreURL := .Values.stateStore.url | default $defaultValkeyURL -}}
+{{- $stateStoreSentinelAddrs := .Values.stateStore.sentinelAddrs -}}
+{{- $stateStoreSentinelMaster := .Values.stateStore.sentinelMaster | default "myprimary" -}}
+{{- $stateStorePrefix := .Values.stateStore.prefix | default "pinglens" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pinglens.coordinatorConfigName" . }}
+  labels:
+    {{- include "pinglens.labels" . | nindent 4 }}
+    app.kubernetes.io/component: coordinator
+data:
+  PINGLENS_MODE: "coordinator"
+  PINGLENS_APP_NAME: {{ .Values.branding.appName | quote }}
+  PINGLENS_BRAND_NAME: {{ .Values.branding.providerName | quote }}
+  PINGLENS_BRAND_URL: {{ .Values.branding.providerURL | quote }}
+  PINGLENS_BRAND_LOGO_URL: {{ .Values.branding.providerLogoURL | quote }}
+  PINGLENS_LISTEN: {{ .Values.coordinator.listen | quote }}
+  PINGLENS_REGIONS: {{ join "," .Values.coordinator.regions | quote }}
+  PINGLENS_PING_COUNT: {{ .Values.coordinator.pingCount | quote }}
+  PINGLENS_PING_INTERVAL: {{ .Values.coordinator.pingInterval | quote }}
+  PINGLENS_PING_TIMEOUT: {{ .Values.coordinator.pingTimeout | quote }}
+  PINGLENS_JOB_DURATION: {{ .Values.coordinator.jobDuration | quote }}
+  PINGLENS_MTR_CYCLES: {{ .Values.coordinator.mtrCycles | quote }}
+  PINGLENS_MTR_MAX_TTL: {{ .Values.coordinator.mtrMaxTTL | quote }}
+  PINGLENS_MTR_INTERVAL: {{ .Values.coordinator.mtrInterval | quote }}
+  PINGLENS_GLOBAL_CREATE_RATE_LIMIT: {{ .Values.coordinator.globalCreateRateLimit | quote }}
+  PINGLENS_TARGET_CREATE_RATE_LIMIT: {{ .Values.coordinator.targetCreateRateLimit | quote }}
+  PINGLENS_CLIENT_CREATE_RATE_LIMIT: {{ .Values.coordinator.clientCreateRateLimit | quote }}
+  PINGLENS_CREATE_RATE_WINDOW: {{ .Values.coordinator.createRateWindow | quote }}
+  PINGLENS_GLOBAL_CONCURRENCY_LIMIT: {{ .Values.coordinator.globalConcurrencyLimit | quote }}
+  PINGLENS_TARGET_CONCURRENCY_LIMIT: {{ .Values.coordinator.targetConcurrencyLimit | quote }}
+  PINGLENS_CLIENT_CONCURRENCY_LIMIT: {{ .Values.coordinator.clientConcurrencyLimit | quote }}
+  PINGLENS_AGENT_POLL_TIMEOUT: {{ .Values.coordinator.agentPollTimeout | quote }}
+  PINGLENS_AGENT_ONLINE_TIMEOUT: {{ .Values.coordinator.agentOnlineTimeout | quote }}
+  PINGLENS_JOB_RETENTION: {{ .Values.coordinator.jobRetention | quote }}
+  PINGLENS_MAX_QUEUED_JOBS_PER_AGENT: {{ .Values.coordinator.maxQueuedJobsPerAgent | quote }}
+  PINGLENS_VALKEY_URL: {{ $stateStoreURL | quote }}
+  PINGLENS_VALKEY_SENTINEL_ADDRS: {{ join "," $stateStoreSentinelAddrs | quote }}
+  PINGLENS_VALKEY_SENTINEL_MASTER: {{ $stateStoreSentinelMaster | quote }}
+  PINGLENS_VALKEY_PREFIX: {{ $stateStorePrefix | quote }}
+{{- end }}
+{{- if and .Values.coordinator.enabled .Values.agent.enabled }}
+---
+{{- end }}
+{{- if .Values.agent.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pinglens.agentConfigName" . }}
+  labels:
+    {{- include "pinglens.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+data:
+  PINGLENS_MODE: "agent"
+  PINGLENS_AGENT_ID: {{ .Values.agent.id | quote }}
+  PINGLENS_DISPLAY_NAME: {{ .Values.agent.displayName | quote }}
+  PINGLENS_COORDINATOR_URL: {{ .Values.agent.coordinatorURL | quote }}
+  PINGLENS_MTR_BINARY: {{ .Values.agent.mtrBinary | quote }}
+  PINGLENS_POLL_BACKOFF: {{ .Values.agent.pollBackoff | quote }}
+{{- end }}

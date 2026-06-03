@@ -1,0 +1,67 @@
+{{- if and .Values.coordinator.enabled .Values.service.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "pinglens.coordinatorFullname" . }}
+  labels:
+    {{- include "pinglens.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  {{- with .Values.service.loadBalancerIP }}
+  loadBalancerIP: {{ . }}
+  {{- end }}
+  {{- with .Values.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if and (eq .Values.service.type "LoadBalancer") .Values.service.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ .Values.service.externalTrafficPolicy }}
+  {{- end }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "pinglens.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: coordinator
+---
+{{- end }}
+{{- if and .Values.coordinator.enabled .Values.agentService.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "pinglens.coordinatorFullname" . }}-{{ .Values.agentService.name }}
+  labels:
+    {{- include "pinglens.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+  {{- with .Values.agentService.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.agentService.type }}
+  {{- with .Values.agentService.loadBalancerIP }}
+  loadBalancerIP: {{ . }}
+  {{- end }}
+  {{- with .Values.agentService.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if and (eq .Values.agentService.type "LoadBalancer") .Values.agentService.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ .Values.agentService.externalTrafficPolicy }}
+  {{- end }}
+  ports:
+    - port: {{ .Values.agentService.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "pinglens.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: coordinator
+{{- end }}

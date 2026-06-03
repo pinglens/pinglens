@@ -1,0 +1,147 @@
+image:
+  repository: ghcr.io/pinglens/pinglens
+  pullPolicy: Always
+  tag: latest
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+branding:
+  appName: PingLens
+  providerName: ""
+  providerURL: ""
+  providerLogoURL: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+agentSecurityContext:
+  runAsUser: 0
+  runAsGroup: 0
+  runAsNonRoot: false
+  allowPrivilegeEscalation: false
+  capabilities:
+    add:
+      - NET_RAW
+    drop:
+      - ALL
+
+service:
+  enabled: true
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+  externalTrafficPolicy: ""
+  loadBalancerIP: ""
+  loadBalancerSourceRanges: []
+
+agentService:
+  enabled: false
+  name: agent
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+  externalTrafficPolicy: ""
+  loadBalancerIP: ""
+  loadBalancerSourceRanges: []
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: ping.l15s.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+serviceMonitor:
+  enabled: false
+  labels: {}
+  interval: 30s
+  scrapeTimeout: 10s
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+valkey:
+  # enabled:
+  auth:
+    enabled: false
+  dataStorage:
+    enabled: false
+  replica:
+    enabled: false
+    replicas: 1
+    service:
+      enabled: false
+    persistence:
+      size: ""
+
+stateStore:
+  url: ""
+  sentinelAddrs: []
+  sentinelMaster: myprimary
+  prefix: pinglens
+  passwordSecret:
+    name: ""
+    key: password
+
+coordinator:
+  enabled: true
+  replicaCount: 1
+  affinity: {}
+  listen: ":8080"
+  regions: []
+  pingCount: 0
+  pingInterval: 1s
+  pingTimeout: 3s
+  jobDuration: 10m
+  mtrCycles: 10
+  mtrMaxTTL: 30
+  mtrInterval: 5s
+  globalCreateRateLimit: 120
+  targetCreateRateLimit: 30
+  clientCreateRateLimit: 20
+  createRateWindow: 1m
+  globalConcurrencyLimit: 100
+  targetConcurrencyLimit: 25
+  clientConcurrencyLimit: 10
+  agentPollTimeout: 30s
+  agentOnlineTimeout: 45s
+  jobRetention: 15m
+  maxQueuedJobsPerAgent: 16
+  agentTokensSecret:
+    name: ""
+    key: agent-tokens
+
+agent:
+  enabled: false
+  replicaCount: 1
+  affinity: {}
+  id: ""
+  displayName: ""
+  coordinatorURL: ""
+  mtrBinary: mtr
+  pollBackoff: 2s
+  tokenSecret:
+    name: ""
+    key: token
+
+extraEnv: []
