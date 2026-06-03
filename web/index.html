@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ .AppName }}</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <form id="probe-form" class="probe-form">
+        <input id="target" name="target" autocomplete="off" spellcheck="false" placeholder="example.com or 203.0.113.10" required>
+        <button type="submit">Start test</button>
+      </form>
+      <p id="message" class="message"></p>
+    </section>
+
+    <section class="regions-card">
+      <div class="card-heading">
+        <h2>Regions</h2>
+        <button id="refresh-regions" class="secondary" type="button">Refresh</button>
+      </div>
+      <div id="regions" class="regions"></div>
+    </section>
+
+    <section class="results-card">
+      <div class="card-heading">
+        <h2>Results</h2>
+        <div class="job-actions">
+          <button id="stop-job" class="secondary" type="button" hidden>Stop</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Region</th>
+              <th>Status</th>
+              <th>Sent</th>
+              <th>Recv</th>
+              <th>Loss</th>
+              <th>Last</th>
+              <th>Min</th>
+              <th>Avg</th>
+              <th>Max</th>
+            </tr>
+          </thead>
+          <tbody id="results"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span>{{ .AppName }}</span>
+      {{- if and .BrandName .BrandURL }}
+      <span class="footer-separator">•</span>
+      <a class="brand-link" href="{{ .BrandURL }}" rel="noopener noreferrer" target="_blank">
+        {{- if .BrandLogoURL }}<img class="brand-logo" src="{{ .BrandLogoURL }}" alt="" loading="lazy">{{ end -}}
+        <span>{{ .BrandName }}</span>
+      </a>
+      {{- end }}
+    </footer>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

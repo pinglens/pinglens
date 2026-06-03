@@ -1,0 +1,57 @@
+stages:
+  - test
+  - build_container
+
+.rules_push_or_merge_request:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH'
+      when: on_success
+    - when: never
+
+go-test:
+  extends: .rules_push_or_merge_request
+  stage: test
+  image: golang:1.23-alpine
+  script:
+    - go test ./...
+
+.build_container_base:
+  stage: build_container
+  image:
+    name: gcr.io/kaniko-project/executor:v1.23.2-debug
+    entrypoint: [""]
+  before_script:
+    - mkdir -p /kaniko/.docker
+    - >
+      echo "{\"auths\":{\"${CI_REGISTRY}\":{\"auth\":\"$(printf "%s:%s"
+      "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" | base64 | tr -d '\n')\"}}}"
+      > /kaniko/.docker/config.json
+
+build_container:
+  extends: .build_container_base
+  script:
+    - >
+      /kaniko/executor
+      --context "${CI_PROJECT_DIR}"
+      --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
+      --destination "${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != "main"'
+      when: on_success
+
+build_container_main:
+  extends: .build_container_base
+  script:
+    - >
+      /kaniko/executor
+      --context "${CI_PROJECT_DIR}"
+      --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
+      --destination "${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}"
+      --destination "${CI_REGISTRY_IMAGE}:latest"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_success
