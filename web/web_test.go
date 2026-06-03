@@ -20,6 +20,9 @@ func TestHandlerDefaultsToGenericBranding(t *testing.T) {
 	if strings.Contains(body, "Example Networks") {
 		t.Fatalf("default page includes deployment branding: %s", body)
 	}
+	if strings.Contains(body, "<h2>Regions</h2>") || strings.Contains(body, `id="regions"`) {
+		t.Fatalf("default page includes standalone regions panel: %s", body)
+	}
 }
 
 func TestHandlerRendersDeploymentBranding(t *testing.T) {
