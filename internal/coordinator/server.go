@@ -19,6 +19,7 @@ import (
 
 type Config struct {
 	ListenAddr             string
+	MetricsListenAddr      string
 	Regions                []string
 	AgentTokens            map[string]string
 	UI                     http.Handler
@@ -194,7 +195,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("/healthz", s.health)
-	s.mux.HandleFunc("/metrics", s.metrics)
 	s.mux.HandleFunc("/api/regions", s.regions)
 	s.mux.HandleFunc("/api/jobs", s.createJob)
 	s.mux.HandleFunc("/api/jobs/", s.jobEvents)
@@ -210,14 +210,73 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte("ok\n"))
 }
 
-func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) MetricsHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", s.health)
+	mux.HandleFunc("/metrics", s.metrics)
+	return mux
+}
+
+func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	snapshot, err := s.store.metricsSnapshot(r.Context(), s.cfg, time.Now().UTC())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	s.mu.Lock()
-	agents := len(s.agents)
-	jobsCreated := s.jobsCreated
-	eventsSeen := s.eventsSeen
+	snapshot.JobsCreated = s.jobsCreated
+	snapshot.EventsSeen = s.eventsSeen
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	_, _ = fmt.Fprintf(w, "pinglens_agents %d\npinglens_jobs_created_total %d\npinglens_events_total %d\n", agents, jobsCreated, eventsSeen)
+	writeMetrics(w, s.cfg, snapshot)
+}
+
+func writeMetrics(w http.ResponseWriter, cfg Config, snapshot metricsSnapshot) {
+	fmt.Fprintf(w, "# TYPE pinglens_agents gauge\npinglens_agents %d\n", snapshot.AgentIDsOnline)
+	fmt.Fprintf(w, "# TYPE pinglens_agent_ids_online gauge\npinglens_agent_ids_online %d\n", snapshot.AgentIDsOnline)
+	fmt.Fprintf(w, "# TYPE pinglens_agent_instances_online gauge\npinglens_agent_instances_online %d\n", snapshot.AgentInstancesOnline)
+	agentIDs := make([]string, 0, len(snapshot.AgentInstancesByID))
+	for id := range snapshot.AgentInstancesByID {
+		agentIDs = append(agentIDs, id)
+	}
+	sort.Strings(agentIDs)
+	fmt.Fprintln(w, "# TYPE pinglens_agent_instances gauge")
+	for _, id := range agentIDs {
+		fmt.Fprintf(w, "pinglens_agent_instances{agent_id=%s} %d\n", prometheusLabelValue(id), snapshot.AgentInstancesByID[id])
+	}
+	fmt.Fprintf(w, "# TYPE pinglens_jobs_created_total counter\npinglens_jobs_created_total %d\n", snapshot.JobsCreated)
+	fmt.Fprintf(w, "# TYPE pinglens_events_total counter\npinglens_events_total %d\n", snapshot.EventsSeen)
+	fmt.Fprintf(w, "# TYPE pinglens_jobs_active gauge\npinglens_jobs_active %d\n", snapshot.ActiveJobs)
+	fmt.Fprintf(w, "# TYPE pinglens_jobs_active_unique_clients gauge\npinglens_jobs_active_unique_clients %d\n", snapshot.ActiveClients)
+	fmt.Fprintf(w, "# TYPE pinglens_jobs_active_unique_targets gauge\npinglens_jobs_active_unique_targets %d\n", snapshot.ActiveTargets)
+	fmt.Fprintf(w, "# TYPE pinglens_sessions_active gauge\npinglens_sessions_active %d\n", snapshot.ActiveJobs)
+	fmt.Fprintf(w, "# TYPE pinglens_sessions_active_unique_clients gauge\npinglens_sessions_active_unique_clients %d\n", snapshot.ActiveClients)
+	fmt.Fprintf(w, "# TYPE pinglens_sessions_active_unique_targets gauge\npinglens_sessions_active_unique_targets %d\n", snapshot.ActiveTargets)
+	fmt.Fprintf(w, "# TYPE pinglens_sessions_global_concurrency_limit gauge\npinglens_sessions_global_concurrency_limit %d\n", cfg.GlobalConcurrencyLimit)
+	fmt.Fprintf(w, "# TYPE pinglens_sessions_client_concurrency_limit gauge\npinglens_sessions_client_concurrency_limit %d\n", cfg.ClientConcurrencyLimit)
+	fmt.Fprintf(w, "# TYPE pinglens_sessions_target_concurrency_limit gauge\npinglens_sessions_target_concurrency_limit %d\n", cfg.TargetConcurrencyLimit)
+	fmt.Fprintf(w, "# TYPE pinglens_jobs_global_concurrency_limit gauge\npinglens_jobs_global_concurrency_limit %d\n", cfg.GlobalConcurrencyLimit)
+	fmt.Fprintf(w, "# TYPE pinglens_jobs_client_concurrency_limit gauge\npinglens_jobs_client_concurrency_limit %d\n", cfg.ClientConcurrencyLimit)
+	fmt.Fprintf(w, "# TYPE pinglens_jobs_target_concurrency_limit gauge\npinglens_jobs_target_concurrency_limit %d\n", cfg.TargetConcurrencyLimit)
+	fmt.Fprintf(w, "# TYPE pinglens_jobs_create_rate_current gauge\npinglens_jobs_create_rate_current %d\n", snapshot.GlobalRateCurrent)
+	fmt.Fprintf(w, "# TYPE pinglens_sessions_create_rate_current gauge\npinglens_sessions_create_rate_current %d\n", snapshot.GlobalRateCurrent)
+	fmt.Fprintln(w, "# TYPE pinglens_sessions_create_rate_limit gauge")
+	fmt.Fprintf(w, "pinglens_sessions_create_rate_limit{scope=\"global\"} %d\n", cfg.GlobalCreateRateLimit)
+	fmt.Fprintf(w, "pinglens_sessions_create_rate_limit{scope=\"client\"} %d\n", cfg.ClientCreateRateLimit)
+	fmt.Fprintf(w, "pinglens_sessions_create_rate_limit{scope=\"target\"} %d\n", cfg.TargetCreateRateLimit)
+	fmt.Fprintln(w, "# TYPE pinglens_jobs_create_rate_limit gauge")
+	fmt.Fprintf(w, "pinglens_jobs_create_rate_limit{scope=\"global\"} %d\n", cfg.GlobalCreateRateLimit)
+	fmt.Fprintf(w, "pinglens_jobs_create_rate_limit{scope=\"client\"} %d\n", cfg.ClientCreateRateLimit)
+	fmt.Fprintf(w, "pinglens_jobs_create_rate_limit{scope=\"target\"} %d\n", cfg.TargetCreateRateLimit)
+}
+
+func prometheusLabelValue(value string) string {
+	escaped := strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "\n", "\\n").Replace(value)
+	return "\"" + escaped + "\""
 }
 
 func (s *Server) regions(w http.ResponseWriter, r *http.Request) {
@@ -276,7 +335,10 @@ func (s *Server) agentPoll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	if !s.authorized(request.ClusterID, r.Header.Get("Authorization")) {
+	auth := s.authorizeAgent(request.ClusterID, r.Header.Get("Authorization"))
+	s.logAgentPollAttempt(r, request, auth)
+	if !auth.ok {
+		s.logRejectedAgentConnection(r, "poll", request.ClusterID, request.InstanceID, "", auth)
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
@@ -293,7 +355,9 @@ func (s *Server) agentEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	if !s.authorized(event.ClusterID, r.Header.Get("Authorization")) {
+	auth := s.authorizeAgent(event.ClusterID, r.Header.Get("Authorization"))
+	if !auth.ok {
+		s.logRejectedAgentConnection(r, "events", event.ClusterID, event.InstanceID, event.JobID, auth)
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
@@ -398,16 +462,108 @@ func (s *Server) appendEventLocked(job *jobState, event protocol.AgentEvent) {
 	}
 }
 
-func (s *Server) authorized(clusterID, authorization string) bool {
+type agentAuthorization struct {
+	ok        bool
+	reason    string
+	tokenHint string
+}
+
+func (s *Server) authorizeAgent(clusterID, authorization string) agentAuthorization {
+	clusterID = strings.TrimSpace(clusterID)
+	if clusterID == "" {
+		return agentAuthorization{reason: "missing agent id"}
+	}
 	token := s.cfg.AgentTokens[clusterID]
 	if token == "" {
-		return false
+		return agentAuthorization{reason: "unknown agent"}
 	}
 	supplied := strings.TrimPrefix(authorization, "Bearer ")
 	if supplied == authorization || supplied == "" {
-		return false
+		return agentAuthorization{reason: "missing bearer token"}
 	}
-	return subtle.ConstantTimeCompare([]byte(token), []byte(supplied)) == 1
+	if subtle.ConstantTimeCompare([]byte(token), []byte(supplied)) != 1 {
+		return agentAuthorization{reason: "invalid token", tokenHint: obfuscateSecret(supplied)}
+	}
+	return agentAuthorization{ok: true}
+}
+
+func (s *Server) logAgentPollAttempt(r *http.Request, request protocol.AgentPollRequest, auth agentAuthorization) {
+	attrs := []any{
+		"agent", strings.TrimSpace(request.ClusterID),
+		"agent_instance", strings.TrimSpace(request.InstanceID),
+		"display_name", strings.TrimSpace(request.DisplayName),
+		"remote", clientKey(r),
+		"authenticated", auth.ok,
+	}
+	if auth.reason != "" {
+		attrs = append(attrs, "reason", auth.reason)
+	}
+	if auth.tokenHint != "" {
+		attrs = append(attrs, "token_hint", auth.tokenHint)
+	}
+	s.logger.Info("agent connection attempt", attrs...)
+}
+
+func (s *Server) logRejectedAgentConnection(r *http.Request, endpoint, agentID, instanceID, jobID string, auth agentAuthorization) {
+	attrs := []any{
+		"endpoint", endpoint,
+		"agent", strings.TrimSpace(agentID),
+		"agent_instance", strings.TrimSpace(instanceID),
+		"remote", clientKey(r),
+		"reason", auth.reason,
+	}
+	if jobID != "" {
+		attrs = append(attrs, "job", jobID)
+	}
+	if auth.tokenHint != "" {
+		attrs = append(attrs, "token_hint", auth.tokenHint)
+	}
+	s.logger.Warn("rejected agent connection", attrs...)
+}
+
+func (s *Server) logAgentRegistration(registration agentRegistration, source string) {
+	if registration.id == "" {
+		return
+	}
+	attrs := []any{
+		"agent", registration.id,
+		"display_name", registration.displayName,
+		"source", source,
+		"backend", "valkey",
+	}
+	if registration.instanceID != "" {
+		attrs = append(attrs, "agent_instance", registration.instanceID)
+	}
+	if !registration.previousLastSeen.IsZero() {
+		attrs = append(attrs, "previous_last_seen", registration.previousLastSeen)
+	}
+	if registration.offlineTransition {
+		offlineAttrs := append([]any{}, attrs...)
+		offlineAttrs = append(offlineAttrs, "reason", "timeout")
+		s.logger.Warn("agent offline", offlineAttrs...)
+	}
+	if registration.instanceOfflineTransition {
+		instanceAttrs := append([]any{}, attrs...)
+		if !registration.previousInstanceLastSeen.IsZero() {
+			instanceAttrs = append(instanceAttrs, "previous_instance_last_seen", registration.previousInstanceLastSeen)
+		}
+		instanceAttrs = append(instanceAttrs, "reason", "timeout")
+		s.logger.Warn("agent instance offline", instanceAttrs...)
+	}
+	if registration.onlineTransition {
+		s.logger.Info("agent online", attrs...)
+	}
+	if registration.instanceOnlineTransition {
+		s.logger.Info("agent instance online", attrs...)
+	}
+}
+
+func obfuscateSecret(secret string) string {
+	secret = strings.TrimSpace(secret)
+	if len(secret) <= 8 {
+		return "****"
+	}
+	return secret[:4] + "****" + secret[len(secret)-4:]
 }
 
 func terminalEvent(eventType string) bool {

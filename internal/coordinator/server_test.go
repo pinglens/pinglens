@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -150,6 +151,101 @@ func TestUnauthorizedAgentRejected(t *testing.T) {
 	}
 }
 
+func TestAgentConnectionLogsRejectedTokenHintWithoutSecret(t *testing.T) {
+	var log bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&log, nil))
+	srv := newTestServerWithLogger(t, Config{Regions: []string{"dfw1"}, AgentTokens: map[string]string{"dfw1": "secret"}}, logger)
+	wrongToken := "wrong-agent-token"
+	body, _ := json.Marshal(protocol.AgentPollRequest{ClusterID: "dfw1", DisplayName: "DFW", Version: protocol.Version})
+	req := httptest.NewRequest(http.MethodPost, "/api/agent/poll", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+wrongToken)
+	resp := httptest.NewRecorder()
+	srv.ServeHTTP(resp, req)
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", resp.Code)
+	}
+	output := log.String()
+	if !strings.Contains(output, "agent connection attempt") || !strings.Contains(output, "rejected agent connection") {
+		t.Fatalf("missing agent connection logs: %s", output)
+	}
+	if strings.Contains(output, wrongToken) {
+		t.Fatalf("log contains raw token: %s", output)
+	}
+	if !strings.Contains(output, "wron****oken") {
+		t.Fatalf("log does not contain obfuscated token hint: %s", output)
+	}
+}
+
+func TestAgentOnlineAndTimeoutLogged(t *testing.T) {
+	var log bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&log, nil))
+	srv := newTestServerWithLogger(t, Config{AgentTokens: map[string]string{"dfw1": "secret"}, AgentPollTimeout: time.Millisecond, AgentOnlineTimeout: 10 * time.Millisecond}, logger)
+	body, _ := json.Marshal(protocol.AgentPollRequest{ClusterID: "dfw1", DisplayName: "DFW", Version: protocol.Version})
+	req := httptest.NewRequest(http.MethodPost, "/api/agent/poll", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer secret")
+	resp := httptest.NewRecorder()
+	srv.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("poll failed: %d %s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(log.String(), "agent online") {
+		t.Fatalf("missing online log: %s", log.String())
+	}
+	time.Sleep(20 * time.Millisecond)
+	regionsReq := httptest.NewRequest(http.MethodGet, "/api/regions", nil)
+	regionsResp := httptest.NewRecorder()
+	srv.ServeHTTP(regionsResp, regionsReq)
+	if regionsResp.Code != http.StatusOK {
+		t.Fatalf("regions failed: %d %s", regionsResp.Code, regionsResp.Body.String())
+	}
+	output := log.String()
+	if !strings.Contains(output, "agent offline") || !strings.Contains(output, "reason=timeout") {
+		t.Fatalf("missing timeout offline log: %s", output)
+	}
+}
+
+func TestMetricsOnlyServedByMetricsHandler(t *testing.T) {
+	srv := newTestServer(t, Config{AgentTokens: map[string]string{"dfw1": "secret"}, AgentPollTimeout: time.Millisecond})
+	publicReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	publicResp := httptest.NewRecorder()
+	srv.ServeHTTP(publicResp, publicReq)
+	if publicResp.Code == http.StatusOK {
+		t.Fatalf("public listener served metrics")
+	}
+	for _, instanceID := range []string{"pod-a", "pod-b"} {
+		body, _ := json.Marshal(protocol.AgentPollRequest{ClusterID: "dfw1", InstanceID: instanceID, DisplayName: "DFW", Version: protocol.Version})
+		req := httptest.NewRequest(http.MethodPost, "/api/agent/poll", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer secret")
+		resp := httptest.NewRecorder()
+		srv.ServeHTTP(resp, req)
+		if resp.Code != http.StatusOK {
+			t.Fatalf("poll failed: %d %s", resp.Code, resp.Body.String())
+		}
+	}
+	if code := createJob(t, srv, "example.com", "198.51.100.55:12345"); code != http.StatusAccepted {
+		t.Fatalf("create got %d", code)
+	}
+	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsResp := httptest.NewRecorder()
+	srv.MetricsHandler().ServeHTTP(metricsResp, metricsReq)
+	if metricsResp.Code != http.StatusOK {
+		t.Fatalf("metrics failed: %d %s", metricsResp.Code, metricsResp.Body.String())
+	}
+	output := metricsResp.Body.String()
+	for _, want := range []string{
+		"pinglens_agent_ids_online 1",
+		"pinglens_agent_instances_online 2",
+		"pinglens_agent_instances{agent_id=\"dfw1\"} 2",
+		"pinglens_sessions_active 1",
+		"pinglens_sessions_active_unique_clients 1",
+		"pinglens_sessions_active_unique_targets 1",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("missing metric %q in:\n%s", want, output)
+		}
+	}
+}
+
 func TestConcurrencyLimits(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -275,9 +371,14 @@ func createJob(t *testing.T, srv *Server, target, remoteAddr string) int {
 
 func newTestServer(t *testing.T, cfg Config) *Server {
 	t.Helper()
+	return newTestServerWithLogger(t, cfg, slog.Default())
+}
+
+func newTestServerWithLogger(t *testing.T, cfg Config, logger *slog.Logger) *Server {
+	t.Helper()
 	mr := miniredis.RunT(t)
 	cfg.ValkeyURL = "redis://" + mr.Addr() + "/0"
-	srv, err := NewServer(cfg, slog.Default())
+	srv, err := NewServer(cfg, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

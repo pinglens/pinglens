@@ -30,6 +30,8 @@ local target_concurrency = tonumber(ARGV[6])
 local global_rate = tonumber(ARGV[7])
 local client_rate = tonumber(ARGV[8])
 local target_rate = tonumber(ARGV[9])
+local client_hash = ARGV[10]
+local target_hash = ARGV[11]
 
 if global_concurrency > 0 and tonumber(redis.call('SCARD', KEYS[1])) >= global_concurrency then
   return 'global active test limit reached'
@@ -72,13 +74,27 @@ end
 redis.call('SADD', KEYS[1], job)
 redis.call('SADD', KEYS[2], job)
 redis.call('SADD', KEYS[3], job)
+redis.call('SADD', KEYS[7], client_hash)
+redis.call('SADD', KEYS[8], target_hash)
 redis.call('PEXPIRE', KEYS[1], active_ttl)
 redis.call('PEXPIRE', KEYS[2], active_ttl)
 redis.call('PEXPIRE', KEYS[3], active_ttl)
+redis.call('PEXPIRE', KEYS[7], active_ttl)
+redis.call('PEXPIRE', KEYS[8], active_ttl)
 hit_rate(KEYS[4], global_rate)
 hit_rate(KEYS[5], client_rate)
 hit_rate(KEYS[6], target_rate)
 return ''
+`
+
+const valkeyMarkAgentOfflineScript = `
+local last_seen = tonumber(redis.call('HGET', KEYS[1], 'last_seen_ms') or '0')
+local cutoff = tonumber(ARGV[1])
+if last_seen > 0 and last_seen <= cutoff and redis.call('HGET', KEYS[1], 'status') == 'online' then
+  redis.call('HSET', KEYS[1], 'status', 'offline', 'last_offline_ms', ARGV[2])
+  return 1
+end
+return 0
 `
 
 type valkeyStore struct {
@@ -130,9 +146,13 @@ func (v *valkeyStore) key(parts ...string) string {
 	return out
 }
 
-func (v *valkeyStore) hashed(kind, value string) string {
+func hashValue(value string) string {
 	sum := sha256.Sum256([]byte(value))
-	return v.key(kind, hex.EncodeToString(sum[:]))
+	return hex.EncodeToString(sum[:])
+}
+
+func (v *valkeyStore) hashed(kind, value string) string {
+	return v.key(kind, hashValue(value))
 }
 
 func (v *valkeyStore) jobTTL(cfg Config) time.Duration {
@@ -143,21 +163,99 @@ func (v *valkeyStore) jobTTL(cfg Config) time.Duration {
 	return ttl
 }
 
-func (v *valkeyStore) registerAgent(ctx context.Context, id string, name string, now time.Time) error {
+type agentRegistration struct {
+	id                        string
+	instanceID                string
+	displayName               string
+	previousLastSeen          time.Time
+	previousInstanceLastSeen  time.Time
+	onlineTransition          bool
+	offlineTransition         bool
+	instanceOnlineTransition  bool
+	instanceOfflineTransition bool
+}
+
+type metricsSnapshot struct {
+	AgentIDsOnline       int64
+	AgentInstancesOnline int64
+	AgentInstancesByID   map[string]int64
+	ActiveJobs           int64
+	ActiveClients        int64
+	ActiveTargets        int64
+	GlobalRateCurrent    int64
+	JobsCreated          int64
+	EventsSeen           int64
+}
+
+func (v *valkeyStore) registerAgent(ctx context.Context, cfg Config, id string, instanceID string, name string, now time.Time) (agentRegistration, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return fmt.Errorf("agent id is required")
+		return agentRegistration{}, fmt.Errorf("agent id is required")
 	}
+	instanceID = strings.TrimSpace(instanceID)
 	name = strings.TrimSpace(name)
+	fields, err := v.client.HGetAll(ctx, v.key("agent", id)).Result()
+	if err != nil {
+		return agentRegistration{}, err
+	}
+	previousName := strings.TrimSpace(fields["name"])
+	lastSeenMillis, _ := strconv.ParseInt(fields["last_seen_ms"], 10, 64)
+	var previousLastSeen time.Time
+	previousOnline := false
+	if lastSeenMillis > 0 {
+		previousLastSeen = time.UnixMilli(lastSeenMillis).UTC()
+		previousOnline = now.Sub(previousLastSeen) <= cfg.AgentOnlineTimeout
+	}
+	previousStatus := fields["status"]
+	var instanceFields map[string]string
+	if instanceID != "" {
+		instanceFields, err = v.client.HGetAll(ctx, v.key("agent_instance", id, instanceID)).Result()
+		if err != nil {
+			return agentRegistration{}, err
+		}
+	}
+	instanceLastSeenMillis, _ := strconv.ParseInt(instanceFields["last_seen_ms"], 10, 64)
+	var previousInstanceLastSeen time.Time
+	previousInstanceOnline := false
+	if instanceLastSeenMillis > 0 {
+		previousInstanceLastSeen = time.UnixMilli(instanceLastSeenMillis).UTC()
+		previousInstanceOnline = now.Sub(previousInstanceLastSeen) <= cfg.AgentOnlineTimeout
+	}
+	previousInstanceStatus := instanceFields["status"]
+	displayName := name
+	if displayName == "" {
+		displayName = previousName
+	}
 	pipe := v.client.Pipeline()
 	pipe.SAdd(ctx, v.key("agents"), id)
+	agentKey := v.key("agent", id)
 	if name != "" {
-		pipe.HSet(ctx, v.key("agent", id), "name", name)
+		pipe.HSet(ctx, agentKey, "name", name)
 	}
-	pipe.HSet(ctx, v.key("agent", id), "last_seen_ms", now.UnixMilli())
-	pipe.Expire(ctx, v.key("agent", id), 24*time.Hour)
-	_, err := pipe.Exec(ctx)
-	return err
+	pipe.HSet(ctx, agentKey, "last_seen_ms", now.UnixMilli(), "status", "online", "last_online_ms", now.UnixMilli())
+	pipe.Expire(ctx, agentKey, 24*time.Hour)
+	if instanceID != "" {
+		instanceKey := v.key("agent_instance", id, instanceID)
+		pipe.SAdd(ctx, v.key("agent_instances", id), instanceID)
+		pipe.HSet(ctx, instanceKey, "last_seen_ms", now.UnixMilli(), "status", "online", "last_online_ms", now.UnixMilli())
+		pipe.Expire(ctx, instanceKey, 24*time.Hour)
+		pipe.Expire(ctx, v.key("agent_instances", id), 24*time.Hour)
+	}
+	_, err = pipe.Exec(ctx)
+	if err != nil {
+		return agentRegistration{}, err
+	}
+	return agentRegistration{
+		id:                        id,
+		instanceID:                instanceID,
+		displayName:               displayName,
+		previousLastSeen:          previousLastSeen,
+		previousInstanceLastSeen:  previousInstanceLastSeen,
+		onlineTransition:          previousStatus != "online" || !previousOnline,
+		offlineTransition:         previousStatus == "online" && lastSeenMillis > 0 && !previousOnline,
+		instanceOnlineTransition:  instanceID != "" && (previousInstanceStatus != "online" || !previousInstanceOnline),
+		instanceOfflineTransition: instanceID != "" && previousInstanceStatus == "online" && instanceLastSeenMillis > 0 && !previousInstanceOnline,
+	}, nil
 }
 
 func (v *valkeyStore) regionStatuses(ctx context.Context, cfg Config, now time.Time) ([]protocol.Region, error) {
@@ -179,6 +277,15 @@ func (v *valkeyStore) regionStatuses(ctx context.Context, cfg Config, now time.T
 		if lastSeenMillis > 0 {
 			region.LastSeen = time.UnixMilli(lastSeenMillis).UTC()
 			region.Online = now.Sub(region.LastSeen) <= cfg.AgentOnlineTimeout
+			if !region.Online && fields["status"] == "online" {
+				changed, err := v.client.Eval(ctx, valkeyMarkAgentOfflineScript, []string{v.key("agent", id)}, now.Add(-cfg.AgentOnlineTimeout).UnixMilli(), now.UnixMilli()).Int()
+				if err != nil {
+					return nil, err
+				}
+				if changed == 1 && v.logger != nil {
+					v.logger.Warn("agent offline", "agent", id, "display_name", region.Name, "last_seen", region.LastSeen, "reason", "timeout", "backend", "valkey")
+				}
+			}
 		}
 		regions = append(regions, region)
 	}
@@ -221,23 +328,137 @@ func (v *valkeyStore) agentIDs(ctx context.Context, cfg Config) ([]string, error
 	return ids, nil
 }
 
+func (v *valkeyStore) metricsSnapshot(ctx context.Context, cfg Config, now time.Time) (metricsSnapshot, error) {
+	regions, err := v.regionStatuses(ctx, cfg, now)
+	if err != nil {
+		return metricsSnapshot{}, err
+	}
+	snapshot := metricsSnapshot{AgentInstancesByID: make(map[string]int64)}
+	for _, region := range regions {
+		if region.Online {
+			snapshot.AgentIDsOnline++
+		}
+		instances, err := v.onlineAgentInstances(ctx, region.ID, region.Name, cfg, now)
+		if err != nil {
+			return metricsSnapshot{}, err
+		}
+		if instances == 0 && region.Online {
+			instances = 1
+		}
+		if instances > 0 {
+			snapshot.AgentInstancesByID[region.ID] = instances
+			snapshot.AgentInstancesOnline += instances
+		}
+	}
+	snapshot.ActiveJobs, err = v.client.SCard(ctx, v.key("active", "global")).Result()
+	if err != nil {
+		return metricsSnapshot{}, err
+	}
+	snapshot.ActiveClients, err = v.activeIndexCount(ctx, v.key("active", "clients"), "active:client")
+	if err != nil {
+		return metricsSnapshot{}, err
+	}
+	snapshot.ActiveTargets, err = v.activeIndexCount(ctx, v.key("active", "targets"), "active:target")
+	if err != nil {
+		return metricsSnapshot{}, err
+	}
+	snapshot.GlobalRateCurrent, err = v.client.Get(ctx, v.key("rate", "global")).Int64()
+	if errors.Is(err, redis.Nil) {
+		snapshot.GlobalRateCurrent = 0
+		err = nil
+	}
+	if err != nil {
+		return metricsSnapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func (v *valkeyStore) onlineAgentInstances(ctx context.Context, id, displayName string, cfg Config, now time.Time) (int64, error) {
+	instances, err := v.client.SMembers(ctx, v.key("agent_instances", id)).Result()
+	if err != nil {
+		return 0, err
+	}
+	var online int64
+	for _, instanceID := range instances {
+		fields, err := v.client.HGetAll(ctx, v.key("agent_instance", id, instanceID)).Result()
+		if err != nil {
+			return 0, err
+		}
+		lastSeenMillis, _ := strconv.ParseInt(fields["last_seen_ms"], 10, 64)
+		if lastSeenMillis == 0 {
+			_ = v.client.SRem(ctx, v.key("agent_instances", id), instanceID).Err()
+			continue
+		}
+		lastSeen := time.UnixMilli(lastSeenMillis).UTC()
+		if now.Sub(lastSeen) <= cfg.AgentOnlineTimeout {
+			online++
+			continue
+		}
+		if fields["status"] == "online" {
+			if err := v.client.HSet(ctx, v.key("agent_instance", id, instanceID), "status", "offline", "last_offline_ms", now.UnixMilli()).Err(); err != nil {
+				return 0, err
+			}
+			if v.logger != nil {
+				v.logger.Warn("agent instance offline", "agent", id, "agent_instance", instanceID, "display_name", displayName, "last_seen", lastSeen, "reason", "timeout", "backend", "valkey")
+			}
+		}
+	}
+	return online, nil
+}
+
+func (v *valkeyStore) activeIndexCount(ctx context.Context, indexKey, activeKind string) (int64, error) {
+	members, err := v.client.SMembers(ctx, indexKey).Result()
+	if err != nil {
+		return 0, err
+	}
+	var active int64
+	for _, member := range members {
+		count, err := v.client.SCard(ctx, v.key(activeKind, member)).Result()
+		if err != nil {
+			return 0, err
+		}
+		if count > 0 {
+			active++
+			continue
+		}
+		if err := v.client.SRem(ctx, indexKey, member).Err(); err != nil {
+			return 0, err
+		}
+	}
+	return active, nil
+}
+
 func (v *valkeyStore) releaseActiveSets(ctx context.Context, jobID, client, target string) {
-	pipe := v.client.Pipeline()
-	pipe.SRem(ctx, v.key("active", "global"), jobID)
-	pipe.SRem(ctx, v.hashed("active:client", client), jobID)
-	pipe.SRem(ctx, v.hashed("active:target", target), jobID)
-	_, _ = pipe.Exec(ctx)
+	_ = v.client.SRem(ctx, v.key("active", "global"), jobID).Err()
+	v.releaseActiveReference(ctx, "active:client", "active", "clients", hashValue(client), jobID)
+	v.releaseActiveReference(ctx, "active:target", "active", "targets", hashValue(target), jobID)
+}
+
+func (v *valkeyStore) releaseActiveReference(ctx context.Context, activeKind, indexKind, indexName, hash, jobID string) {
+	activeKey := v.key(activeKind, hash)
+	indexKey := v.key(indexKind, indexName)
+	if err := v.client.SRem(ctx, activeKey, jobID).Err(); err != nil {
+		return
+	}
+	count, err := v.client.SCard(ctx, activeKey).Result()
+	if err == nil && count == 0 {
+		_ = v.client.SRem(ctx, indexKey, hash).Err()
+	}
 }
 
 func (v *valkeyStore) admit(ctx context.Context, cfg Config, jobID, client, target string) (string, error) {
 	activeTTL := v.jobTTL(cfg)
+	clientHash := hashValue(client)
+	targetHash := hashValue(target)
 	keys := []string{
 		v.key("active", "global"),
-		v.hashed("active:client", client),
-		v.hashed("active:target", target),
+		v.key("active:client", clientHash),
+		v.key("active:target", targetHash),
 		v.key("rate", "global"),
 		v.hashed("rate:client", client),
 		v.hashed("rate:target", target),
+		v.key("active", "clients"),
+		v.key("active", "targets"),
 	}
 	args := []any{
 		jobID,
@@ -249,6 +470,8 @@ func (v *valkeyStore) admit(ctx context.Context, cfg Config, jobID, client, targ
 		cfg.GlobalCreateRateLimit,
 		cfg.ClientCreateRateLimit,
 		cfg.TargetCreateRateLimit,
+		clientHash,
+		targetHash,
 	}
 	result, err := v.client.Eval(ctx, valkeyAdmissionScript, keys, args...).Text()
 	if errors.Is(err, redis.Nil) {
@@ -335,16 +558,14 @@ func (v *valkeyStore) finishJob(ctx context.Context, jobID string) error {
 	if fields["completed"] == "1" {
 		return nil
 	}
-	pipe := v.client.Pipeline()
-	pipe.HSet(ctx, v.key("job", jobID), "completed", 1)
-	pipe.SRem(ctx, v.key("active", "global"), jobID)
-	pipe.SRem(ctx, v.hashed("active:client", fields["client"]), jobID)
-	pipe.SRem(ctx, v.hashed("active:target", fields["target"]), jobID)
-	_, err = pipe.Exec(ctx)
-	if err == nil && v.logger != nil && fields["canceled"] != "1" {
+	if err := v.client.HSet(ctx, v.key("job", jobID), "completed", 1).Err(); err != nil {
+		return err
+	}
+	v.releaseActiveSets(ctx, jobID, fields["client"], fields["target"])
+	if v.logger != nil && fields["canceled"] != "1" {
 		v.logger.Info("completed probe job", "job", jobID, "target", fields["target"], "backend", "valkey")
 	}
-	return err
+	return nil
 }
 
 func (v *valkeyStore) cancelJob(ctx context.Context, cfg Config, jobID, reason string) error {
@@ -465,10 +686,13 @@ func (s *Server) createJobValkey(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) agentPollValkey(w http.ResponseWriter, r *http.Request, request protocol.AgentPollRequest) {
 	ctx := r.Context()
-	if err := s.store.registerAgent(ctx, request.ClusterID, request.DisplayName, time.Now().UTC()); err != nil {
+	now := time.Now().UTC()
+	registration, err := s.store.registerAgent(ctx, s.cfg, request.ClusterID, request.InstanceID, request.DisplayName, now)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	s.logAgentRegistration(registration, "poll")
 	result, err := s.store.client.BRPop(ctx, s.cfg.AgentPollTimeout, s.store.key("queue", request.ClusterID)).Result()
 	if errors.Is(err, redis.Nil) {
 		writeJSON(w, http.StatusOK, protocol.AgentPollResponse{})
@@ -501,7 +725,12 @@ func (s *Server) agentPollValkey(w http.ResponseWriter, r *http.Request, request
 
 func (s *Server) agentEventsValkey(w http.ResponseWriter, r *http.Request, event protocol.AgentEvent) {
 	ctx := r.Context()
-	_ = s.store.registerAgent(ctx, event.ClusterID, "", time.Now().UTC())
+	registration, err := s.store.registerAgent(ctx, s.cfg, event.ClusterID, event.InstanceID, "", time.Now().UTC())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.logAgentRegistration(registration, "events")
 	exists, canceled, _, err := s.store.jobStatus(ctx, event.JobID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

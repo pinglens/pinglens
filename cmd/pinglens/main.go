@@ -56,9 +56,10 @@ func hasAgentConfig() bool {
 
 func runCoordinator(ctx context.Context, logger *slog.Logger) error {
 	cfg := coordinator.Config{
-		ListenAddr:  env("PINGLENS_LISTEN", ":8080"),
-		Regions:     splitCSV(os.Getenv("PINGLENS_REGIONS")),
-		AgentTokens: parseTokens(os.Getenv("PINGLENS_AGENT_TOKENS")),
+		ListenAddr:        env("PINGLENS_LISTEN", ":8080"),
+		MetricsListenAddr: env("PINGLENS_METRICS_LISTEN", ":9090"),
+		Regions:           splitCSV(os.Getenv("PINGLENS_REGIONS")),
+		AgentTokens:       parseTokens(os.Getenv("PINGLENS_AGENT_TOKENS")),
 		UI: web.Handler(web.Config{
 			AppName:      env("PINGLENS_APP_NAME", "PingLens"),
 			BrandName:    os.Getenv("PINGLENS_BRAND_NAME"),
@@ -94,11 +95,16 @@ func runCoordinator(ctx context.Context, logger *slog.Logger) error {
 		return err
 	}
 	httpServer := &http.Server{Addr: cfg.ListenAddr, Handler: srv}
+	metricsServer := &http.Server{Addr: cfg.MetricsListenAddr, Handler: srv.MetricsHandler()}
 
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 2)
 	go func() {
 		logger.Info("starting coordinator", "listen", cfg.ListenAddr, "regions", strings.Join(cfg.Regions, ","))
 		errCh <- httpServer.ListenAndServe()
+	}()
+	go func() {
+		logger.Info("starting coordinator metrics", "listen", cfg.MetricsListenAddr)
+		errCh <- metricsServer.ListenAndServe()
 	}()
 
 	select {
@@ -106,6 +112,9 @@ func runCoordinator(ctx context.Context, logger *slog.Logger) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		if err := metricsServer.Shutdown(shutdownCtx); err != nil {
 			return err
 		}
 		return nil
