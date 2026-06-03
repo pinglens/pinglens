@@ -148,9 +148,13 @@ func (v *valkeyStore) registerAgent(ctx context.Context, id string, name string,
 	if id == "" {
 		return fmt.Errorf("agent id is required")
 	}
+	name = strings.TrimSpace(name)
 	pipe := v.client.Pipeline()
 	pipe.SAdd(ctx, v.key("agents"), id)
-	pipe.HSet(ctx, v.key("agent", id), "name", strings.TrimSpace(name), "last_seen_ms", now.UnixMilli())
+	if name != "" {
+		pipe.HSet(ctx, v.key("agent", id), "name", name)
+	}
+	pipe.HSet(ctx, v.key("agent", id), "last_seen_ms", now.UnixMilli())
 	pipe.Expire(ctx, v.key("agent", id), 24*time.Hour)
 	_, err := pipe.Exec(ctx)
 	return err
