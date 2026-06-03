@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -96,6 +97,53 @@ func TestAgentPollKeepsDisplayNameWhenReplicaOmitsIt(t *testing.T) {
 	}
 	if len(regions.Regions) != 1 || regions.Regions[0].Name != "DFW (Dallas, US)" {
 		t.Fatalf("unexpected regions: %+v", regions.Regions)
+	}
+}
+
+func TestRegionsOnlyReturnsOnlineAgents(t *testing.T) {
+	cfg := Config{AgentTokens: map[string]string{"dfw1": "secret"}, AgentOnlineTimeout: 50 * time.Millisecond}
+	srv := newTestServer(t, cfg)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, err := srv.store.registerAgent(ctx, cfg, "dfw1", "", "DFW (Dallas, US)", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.registerAgent(ctx, cfg, "ams1", "", "AMS (Amsterdam, NL)", now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	regionsReq := httptest.NewRequest(http.MethodGet, "/api/regions", nil)
+	regionsResp := httptest.NewRecorder()
+	srv.ServeHTTP(regionsResp, regionsReq)
+	if regionsResp.Code != http.StatusOK {
+		t.Fatalf("regions failed: %d %s", regionsResp.Code, regionsResp.Body.String())
+	}
+	var regions protocol.RegionsResponse
+	if err := json.Unmarshal(regionsResp.Body.Bytes(), &regions); err != nil {
+		t.Fatal(err)
+	}
+	if len(regions.Regions) != 1 || regions.Regions[0].ID != "dfw1" || !regions.Regions[0].Online {
+		t.Fatalf("unexpected regions: %+v", regions.Regions)
+	}
+	stalePresent, err := srv.store.client.SIsMember(ctx, srv.store.key("agents"), "ams1").Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stalePresent {
+		t.Fatal("stale agent remained in agents set")
+	}
+}
+
+func TestCreateJobRequiresOnlineAgent(t *testing.T) {
+	srv := newTestServer(t, Config{AgentTokens: map[string]string{"dfw1": "secret"}, AgentPollTimeout: 10 * time.Millisecond})
+
+	body, _ := json.Marshal(protocol.JobCreateRequest{Target: "example.com"})
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs", bytes.NewReader(body))
+	req.RemoteAddr = "198.51.100.11:12345"
+	resp := httptest.NewRecorder()
+	srv.ServeHTTP(resp, req)
+	if resp.Code != http.StatusServiceUnavailable {
+		t.Fatalf("create got %d %s, want 503", resp.Code, resp.Body.String())
 	}
 }
 

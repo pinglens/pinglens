@@ -269,23 +269,28 @@ func (v *valkeyStore) regionStatuses(ctx context.Context, cfg Config, now time.T
 		if err != nil {
 			return nil, err
 		}
-		region := protocol.Region{ID: id, Name: id}
-		if name := strings.TrimSpace(fields["name"]); name != "" {
-			region.Name = name
-		}
 		lastSeenMillis, _ := strconv.ParseInt(fields["last_seen_ms"], 10, 64)
-		if lastSeenMillis > 0 {
-			region.LastSeen = time.UnixMilli(lastSeenMillis).UTC()
-			region.Online = now.Sub(region.LastSeen) <= cfg.AgentOnlineTimeout
-			if !region.Online && fields["status"] == "online" {
+		if lastSeenMillis <= 0 {
+			_ = v.client.SRem(ctx, v.key("agents"), id).Err()
+			continue
+		}
+		lastSeen := time.UnixMilli(lastSeenMillis).UTC()
+		if now.Sub(lastSeen) > cfg.AgentOnlineTimeout {
+			if fields["status"] == "online" {
 				changed, err := v.client.Eval(ctx, valkeyMarkAgentOfflineScript, []string{v.key("agent", id)}, now.Add(-cfg.AgentOnlineTimeout).UnixMilli(), now.UnixMilli()).Int()
 				if err != nil {
 					return nil, err
 				}
 				if changed == 1 && v.logger != nil {
-					v.logger.Warn("agent offline", "agent", id, "display_name", region.Name, "last_seen", region.LastSeen, "reason", "timeout", "backend", "valkey")
+					v.logger.Warn("agent offline", "agent", id, "display_name", strings.TrimSpace(fields["name"]), "last_seen", lastSeen, "reason", "timeout", "backend", "valkey")
 				}
 			}
+			_ = v.client.SRem(ctx, v.key("agents"), id).Err()
+			continue
+		}
+		region := protocol.Region{ID: id, Name: id, LastSeen: lastSeen, Online: true}
+		if name := strings.TrimSpace(fields["name"]); name != "" {
+			region.Name = name
 		}
 		regions = append(regions, region)
 	}
@@ -643,6 +648,10 @@ func (s *Server) createJobValkey(w http.ResponseWriter, r *http.Request) {
 	regions, err := s.store.regionStatuses(ctx, s.cfg, now)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(regions) == 0 {
+		writeError(w, http.StatusServiceUnavailable, "no agents online")
 		return
 	}
 	reason, err := s.store.admit(ctx, s.cfg, id, client, normalized)
