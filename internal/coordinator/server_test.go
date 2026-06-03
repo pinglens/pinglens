@@ -60,6 +60,44 @@ func TestCreateJobQueuesOnlineAgent(t *testing.T) {
 	}
 }
 
+func TestAgentPollKeepsDisplayNameWhenReplicaOmitsIt(t *testing.T) {
+	srv := newTestServer(t, Config{AgentTokens: map[string]string{"dfw1": "secret"}, AgentPollTimeout: 10 * time.Millisecond})
+
+	namedBody, _ := json.Marshal(protocol.AgentPollRequest{ClusterID: "dfw1", DisplayName: "DFW (Dallas, US)", Version: protocol.Version})
+	namedReq := httptest.NewRequest(http.MethodPost, "/api/agent/poll", bytes.NewReader(namedBody))
+	namedReq.Header.Set("Authorization", "Bearer secret")
+	namedReq.Header.Set("Content-Type", "application/json")
+	namedResp := httptest.NewRecorder()
+	srv.ServeHTTP(namedResp, namedReq)
+	if namedResp.Code != http.StatusOK {
+		t.Fatalf("named poll failed: %d %s", namedResp.Code, namedResp.Body.String())
+	}
+
+	unnamedBody, _ := json.Marshal(protocol.AgentPollRequest{ClusterID: "dfw1", Version: protocol.Version})
+	unnamedReq := httptest.NewRequest(http.MethodPost, "/api/agent/poll", bytes.NewReader(unnamedBody))
+	unnamedReq.Header.Set("Authorization", "Bearer secret")
+	unnamedReq.Header.Set("Content-Type", "application/json")
+	unnamedResp := httptest.NewRecorder()
+	srv.ServeHTTP(unnamedResp, unnamedReq)
+	if unnamedResp.Code != http.StatusOK {
+		t.Fatalf("unnamed poll failed: %d %s", unnamedResp.Code, unnamedResp.Body.String())
+	}
+
+	regionsReq := httptest.NewRequest(http.MethodGet, "/api/regions", nil)
+	regionsResp := httptest.NewRecorder()
+	srv.ServeHTTP(regionsResp, regionsReq)
+	if regionsResp.Code != http.StatusOK {
+		t.Fatalf("regions failed: %d %s", regionsResp.Code, regionsResp.Body.String())
+	}
+	var regions protocol.RegionsResponse
+	if err := json.Unmarshal(regionsResp.Body.Bytes(), &regions); err != nil {
+		t.Fatal(err)
+	}
+	if len(regions.Regions) != 1 || regions.Regions[0].Name != "DFW (Dallas, US)" {
+		t.Fatalf("unexpected regions: %+v", regions.Regions)
+	}
+}
+
 func TestCancelJobRejectsFurtherAgentEvents(t *testing.T) {
 	srv := newTestServer(t, Config{AgentTokens: map[string]string{"dfw1": "secret"}, AgentPollTimeout: 10 * time.Millisecond, JobDuration: 3 * time.Second})
 
