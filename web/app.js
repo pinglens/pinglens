@@ -146,14 +146,14 @@
       const id = typeof region === 'object' && region !== null ? region.id : region;
       if (rows.has(id)) return rows.get(id);
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td><span class="region-name">${escapeHTML(regionName(region))}</span><span class="resolved-address muted mono" hidden></span></td><td class="status muted">queued</td><td class="chart-cell"><svg class="probe-chart" role="img" aria-label="No ping samples yet" viewBox="0 0 ${CHART_WIDTH} ${CHART_HEIGHT}" preserveAspectRatio="none"></svg></td><td class="count mono">0</td><td class="loss mono">—</td><td class="min mono">—</td><td class="avg mono">—</td><td class="max mono">—</td><td><button class="secondary expand" disabled>MTR</button></td>`;
+      tr.innerHTML = `<td><span class="region-name">${escapeHTML(regionName(region))}</span></td><td class="status muted">queued</td><td class="resolved-address muted mono">—</td><td class="chart-cell"><svg class="probe-chart" role="img" aria-label="No ping samples yet" viewBox="0 0 ${CHART_WIDTH} ${CHART_HEIGHT}" preserveAspectRatio="none"></svg></td><td class="loss mono">—</td><td class="min mono">—</td><td class="avg mono">—</td><td class="max mono">—</td><td><button class="secondary expand" disabled>MTR</button></td>`;
       const details = document.createElement('tr');
       details.className = 'details-row';
       details.hidden = true;
       details.innerHTML = '<td colspan="9"><div class="trace-output muted mono">MTR details pending.</div></td>';
       resultsBody.appendChild(tr);
       resultsBody.appendChild(details);
-      const state = { id, tr, details, chart: tr.querySelector('.probe-chart'), samples: [], count: 0, trace: null };
+      const state = { id, tr, details, chart: tr.querySelector('.probe-chart'), samples: [], trace: null };
       tr.querySelector('.expand').addEventListener('click', () => { details.hidden = !details.hidden; });
       renderChart(state);
       rows.set(id, state);
@@ -163,9 +163,7 @@
     function applyEvent(event) {
       const row = ensureRow(event.cluster_id);
       if (event.resolved) {
-        const resolved = row.tr.querySelector('.resolved-address');
-        resolved.textContent = event.resolved;
-        resolved.hidden = false;
+        row.tr.querySelector('.resolved-address').textContent = event.resolved;
         row.tr.querySelector('.region-name').title = event.resolved;
       }
       const status = row.tr.querySelector('.status');
@@ -178,11 +176,9 @@
         status.className = 'status warn';
         row.done = false;
       } else if (event.type === 'ping' && event.ping) {
-        row.count++;
         const sample = chartSampleFromPing(event.ping);
         row.samples.push(sample);
         if (row.samples.length > MAX_CHART_SAMPLES) row.samples.shift();
-        row.tr.querySelector('.count').textContent = row.count;
         if (sample.success) {
           status.textContent = fmt(event.ping.rtt_ms, ' ms');
           status.className = 'status good';
@@ -192,8 +188,6 @@
         }
         renderChart(row);
       } else if (event.type === 'summary' && event.summary) {
-        row.count = event.summary.sent;
-        row.tr.querySelector('.count').textContent = event.summary.sent;
         row.tr.querySelector('.loss').textContent = fmt(event.summary.loss_pct, '%');
         row.tr.querySelector('.min').textContent = fmt(event.summary.min_ms, ' ms');
         row.tr.querySelector('.avg').textContent = fmt(event.summary.avg_ms, ' ms');
