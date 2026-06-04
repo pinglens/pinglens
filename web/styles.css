@@ -52,7 +52,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
   background: linear-gradient(180deg, rgb(255 255 255 / 4%), rgb(255 255 255 / 1%));
 }
 .chart-grid { stroke: color-mix(in srgb, var(--muted) 24%, transparent); stroke-width: 1; vector-effect: non-scaling-stroke; }
-.chart-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.chart-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: butt; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .chart-loss-bar { fill: color-mix(in srgb, var(--bad) 86%, transparent); }
 tr.details-row td { background: rgb(255 255 255 / 2%); padding: 8px 10px; white-space: normal; }
 .trace-output { font-size: 12px; line-height: 1.35; }

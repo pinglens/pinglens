@@ -37,8 +37,11 @@
       }
     }
 
-    const points = [];
+    const segments = [];
     const losses = [];
+    let current = [];
+    let currentY;
+    let previousLossEnd;
     let successCount = 0;
     let lossCount = 0;
     const sampleCount = visible.length;
@@ -47,23 +50,39 @@
     const plotTop = 2;
     const plotHeight = Math.max(1, height - 4);
 
+    function flushSegment() {
+      if (current.length > 0) {
+        segments.push(current);
+        current = [];
+        currentY = undefined;
+      }
+    }
+
     for (let i = 0; i < sampleCount; i++) {
       const sample = visible[i];
       const x = sampleCount > 1 ? i * step : width / 2;
       if (sample && sample.success === true && Number.isFinite(sample.rtt) && sample.rtt >= 0) {
         successCount++;
         const ratio = clamp(sample.rtt / maxRTT, 0, 1);
-        const y = plotTop + (1 - ratio) * plotHeight;
-        points.push(`${roundCoord(x)},${roundCoord(y)}`);
+        const y = roundCoord(plotTop + (1 - ratio) * plotHeight);
+        if (current.length === 0 && previousLossEnd !== undefined) current.push(`${previousLossEnd},${y}`);
+        current.push(`${roundCoord(x)},${y}`);
+        currentY = y;
+        previousLossEnd = undefined;
         continue;
       }
       lossCount++;
+      const lossX = roundCoord(clamp(x - barWidth / 2, 0, Math.max(0, width - barWidth)));
+      const lossWidth = roundCoord(barWidth);
+      if (current.length > 0) current.push(`${lossX},${currentY}`);
+      flushSegment();
+      previousLossEnd = roundCoord(lossX + lossWidth);
       losses.push({
-        x: roundCoord(clamp(x - barWidth / 2, 0, Math.max(0, width - barWidth))),
-        width: roundCoord(barWidth),
+        x: lossX,
+        width: lossWidth,
       });
     }
-    const segments = points.length > 0 ? [points] : [];
+    flushSegment();
 
     let label = 'No ping samples yet';
     if (sampleCount > 0) {
@@ -131,14 +150,14 @@
       const id = typeof region === 'object' && region !== null ? region.id : region;
       if (rows.has(id)) return rows.get(id);
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td><span class="region-name">${escapeHTML(regionName(region))}</span></td><td class="status muted">queued</td><td class="chart-cell"><svg class="probe-chart" role="img" aria-label="No ping samples yet" viewBox="0 0 ${CHART_WIDTH} ${CHART_HEIGHT}" preserveAspectRatio="none"></svg></td><td class="sent mono">0</td><td class="recv mono">0</td><td class="loss mono">—</td><td class="last mono">—</td><td class="min mono">—</td><td class="avg mono">—</td><td class="max mono">—</td><td><button class="secondary expand" disabled>MTR</button></td>`;
+      tr.innerHTML = `<td><span class="region-name">${escapeHTML(regionName(region))}</span></td><td class="status muted">queued</td><td class="chart-cell"><svg class="probe-chart" role="img" aria-label="No ping samples yet" viewBox="0 0 ${CHART_WIDTH} ${CHART_HEIGHT}" preserveAspectRatio="none"></svg></td><td class="count mono">0</td><td class="loss mono">—</td><td class="min mono">—</td><td class="avg mono">—</td><td class="max mono">—</td><td><button class="secondary expand" disabled>MTR</button></td>`;
       const details = document.createElement('tr');
       details.className = 'details-row';
       details.hidden = true;
-      details.innerHTML = '<td colspan="11"><div class="trace-output muted mono">MTR details pending.</div></td>';
+      details.innerHTML = '<td colspan="9"><div class="trace-output muted mono">MTR details pending.</div></td>';
       resultsBody.appendChild(tr);
       resultsBody.appendChild(details);
-      const state = { id, tr, details, chart: tr.querySelector('.probe-chart'), samples: [], sent: 0, recv: 0, trace: null };
+      const state = { id, tr, details, chart: tr.querySelector('.probe-chart'), samples: [], count: 0, trace: null };
       tr.querySelector('.expand').addEventListener('click', () => { details.hidden = !details.hidden; });
       renderChart(state);
       rows.set(id, state);
@@ -158,28 +177,22 @@
         status.className = 'status warn';
         row.done = false;
       } else if (event.type === 'ping' && event.ping) {
-        row.sent++;
+        row.count++;
         const sample = chartSampleFromPing(event.ping);
         row.samples.push(sample);
         if (row.samples.length > MAX_CHART_SAMPLES) row.samples.shift();
-        row.tr.querySelector('.sent').textContent = row.sent;
+        row.tr.querySelector('.count').textContent = row.count;
         if (sample.success) {
-          row.recv++;
-          row.tr.querySelector('.recv').textContent = row.recv;
-          row.tr.querySelector('.last').textContent = fmt(event.ping.rtt_ms, ' ms');
-          status.textContent = 'running';
-          status.className = 'status warn';
+          status.textContent = fmt(event.ping.rtt_ms, ' ms');
+          status.className = 'status good';
         } else {
-          row.tr.querySelector('.last').textContent = event.ping.error || 'loss';
-          status.textContent = 'loss';
+          status.textContent = event.ping.error || 'loss';
           status.className = 'status bad';
         }
         renderChart(row);
       } else if (event.type === 'summary' && event.summary) {
-        row.sent = event.summary.sent;
-        row.recv = event.summary.received;
-        row.tr.querySelector('.sent').textContent = event.summary.sent;
-        row.tr.querySelector('.recv').textContent = event.summary.received;
+        row.count = event.summary.sent;
+        row.tr.querySelector('.count').textContent = event.summary.sent;
         row.tr.querySelector('.loss').textContent = fmt(event.summary.loss_pct, '%');
         row.tr.querySelector('.min').textContent = fmt(event.summary.min_ms, ' ms');
         row.tr.querySelector('.avg').textContent = fmt(event.summary.avg_ms, ' ms');

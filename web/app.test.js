@@ -11,14 +11,14 @@ test('chartSampleFromPing treats failed pings as loss samples', () => {
   assert.deepEqual(chartSampleFromPing({ success: false, error: 'timeout' }), { success: false, rtt: NaN });
 });
 
-test('buildChartModel overlays loss bars without breaking the latency line', () => {
+test('buildChartModel stops latency line at loss bar edges', () => {
   const model = buildChartModel([
     { success: true, rtt: 10 },
     { success: false, rtt: NaN },
     { success: true, rtt: 20 },
   ], 100, 20);
 
-  assert.deepEqual(model.segments, [['0,10', '100,2']]);
+  assert.deepEqual(model.segments, [['0,10', '47,10'], ['53,2', '100,2']]);
   assert.deepEqual(model.losses, [{ x: 47, width: 6 }]);
   assert.equal(model.successCount, 2);
   assert.equal(model.lossCount, 1);
