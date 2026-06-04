@@ -17,6 +17,14 @@ go-test:
   script:
     - go test ./...
 
+
+web-test:
+  extends: .rules_push_or_merge_request
+  stage: test
+  image: node:22-alpine
+  script:
+    - node --test web/*.test.js
+
 .build_container_base:
   stage: build_container
   image:
