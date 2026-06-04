@@ -11,18 +11,24 @@ test('chartSampleFromPing treats failed pings as loss samples', () => {
   assert.deepEqual(chartSampleFromPing({ success: false, error: 'timeout' }), { success: false, rtt: NaN });
 });
 
-test('buildChartModel renders red loss bars and separates latency lines across loss', () => {
+test('buildChartModel overlays loss bars without breaking the latency line', () => {
   const model = buildChartModel([
     { success: true, rtt: 10 },
     { success: false, rtt: NaN },
     { success: true, rtt: 20 },
   ], 100, 20);
 
-  assert.deepEqual(model.segments, [['0,10'], ['100,2']]);
+  assert.deepEqual(model.segments, [['0,10', '100,2']]);
   assert.deepEqual(model.losses, [{ x: 47, width: 6 }]);
   assert.equal(model.successCount, 2);
   assert.equal(model.lossCount, 1);
   assert.match(model.label, /3 ping samples, 2 received, 1 lost/);
+});
+
+test('buildChartModel defaults to a compact chart width', () => {
+  const model = buildChartModel([{ success: true, rtt: 10 }]);
+
+  assert.equal(model.width, 130);
 });
 
 test('buildChartModel keeps the most recent chart samples', () => {

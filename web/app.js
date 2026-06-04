@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const CHART_WIDTH = 260;
+  const CHART_WIDTH = 130;
   const CHART_HEIGHT = 44;
   const MAX_CHART_SAMPLES = 600;
 
@@ -37,9 +37,8 @@
       }
     }
 
-    const segments = [];
+    const points = [];
     const losses = [];
-    let current = [];
     let successCount = 0;
     let lossCount = 0;
     const sampleCount = visible.length;
@@ -48,13 +47,6 @@
     const plotTop = 2;
     const plotHeight = Math.max(1, height - 4);
 
-    function flushSegment() {
-      if (current.length > 0) {
-        segments.push(current);
-        current = [];
-      }
-    }
-
     for (let i = 0; i < sampleCount; i++) {
       const sample = visible[i];
       const x = sampleCount > 1 ? i * step : width / 2;
@@ -62,17 +54,16 @@
         successCount++;
         const ratio = clamp(sample.rtt / maxRTT, 0, 1);
         const y = plotTop + (1 - ratio) * plotHeight;
-        current.push(`${roundCoord(x)},${roundCoord(y)}`);
+        points.push(`${roundCoord(x)},${roundCoord(y)}`);
         continue;
       }
       lossCount++;
-      flushSegment();
       losses.push({
         x: roundCoord(clamp(x - barWidth / 2, 0, Math.max(0, width - barWidth))),
         width: roundCoord(barWidth),
       });
     }
-    flushSegment();
+    const segments = points.length > 0 ? [points] : [];
 
     let label = 'No ping samples yet';
     if (sampleCount > 0) {

@@ -42,10 +42,10 @@ table { width: 100%; border-collapse: collapse; }
 .results-card table { font-size: 13px; }
 th, td { border-bottom: 1px solid var(--line); padding: 12px 10px; text-align: left; white-space: nowrap; }
 th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
-.chart-cell { min-width: 260px; width: 280px; }
+.chart-cell { min-width: 130px; width: 150px; }
 .probe-chart {
   display: block;
-  width: 260px;
+  width: 130px;
   height: 44px;
   border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
   border-radius: 8px;
@@ -70,4 +70,4 @@ tr.details-row td { background: rgb(255 255 255 / 2%); padding: 8px 10px; white-
 .brand-link { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); text-decoration: none; }
 .brand-link:hover { color: var(--text); }
 .brand-logo { width: 18px; height: 18px; border-radius: 4px; }
-@media (max-width: 720px) { .probe-form { flex-direction: column; } .chart-cell { min-width: 220px; } .probe-chart { width: 220px; } }
+@media (max-width: 720px) { .probe-form { flex-direction: column; } .chart-cell { min-width: 120px; } .probe-chart { width: 120px; } }
