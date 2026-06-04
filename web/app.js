@@ -146,7 +146,7 @@
       const id = typeof region === 'object' && region !== null ? region.id : region;
       if (rows.has(id)) return rows.get(id);
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td><span class="region-name">${escapeHTML(regionName(region))}</span></td><td class="status muted">queued</td><td class="resolved-address muted mono">—</td><td class="chart-cell"><svg class="probe-chart" role="img" aria-label="No ping samples yet" viewBox="0 0 ${CHART_WIDTH} ${CHART_HEIGHT}" preserveAspectRatio="none"></svg></td><td class="loss mono">—</td><td class="min mono">—</td><td class="avg mono">—</td><td class="max mono">—</td><td><button class="secondary expand" disabled>MTR</button></td>`;
+      tr.innerHTML = `<td><span class="region-name">${escapeHTML(regionName(region))}</span></td><td class="resolved-address muted mono">—</td><td class="status mono muted">queued</td><td class="chart-cell"><svg class="probe-chart" role="img" aria-label="No ping samples yet" viewBox="0 0 ${CHART_WIDTH} ${CHART_HEIGHT}" preserveAspectRatio="none"></svg></td><td class="loss mono">—</td><td class="min mono">—</td><td class="avg mono">—</td><td class="max mono">—</td><td><button class="secondary expand" disabled>MTR</button></td>`;
       const details = document.createElement('tr');
       details.className = 'details-row';
       details.hidden = true;
@@ -170,10 +170,10 @@
       if (event.type === 'offline' || event.type === 'busy' || event.type === 'error') {
         row.done = true;
         status.textContent = event.error || event.type;
-        status.className = 'status bad';
+        status.className = 'status mono bad';
       } else if (event.type === 'start') {
         status.textContent = 'running';
-        status.className = 'status warn';
+        status.className = 'status mono warn';
         row.done = false;
       } else if (event.type === 'ping' && event.ping) {
         const sample = chartSampleFromPing(event.ping);
@@ -181,10 +181,10 @@
         if (row.samples.length > MAX_CHART_SAMPLES) row.samples.shift();
         if (sample.success) {
           status.textContent = fmt(event.ping.rtt_ms, ' ms');
-          status.className = 'status good';
+          status.className = 'status mono good';
         } else {
           status.textContent = event.ping.error || 'loss';
-          status.className = 'status bad';
+          status.className = 'status mono bad';
         }
         renderChart(row);
       } else if (event.type === 'summary' && event.summary) {
@@ -198,7 +198,7 @@
       } else if (event.type === 'complete') {
         row.done = true;
         status.textContent = 'complete';
-        status.className = 'status good';
+        status.className = 'status mono good';
       }
       updateJobCompletion();
     }
