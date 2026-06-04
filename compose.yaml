@@ -1,0 +1,54 @@
+services:
+  valkey:
+    image: valkey/valkey:8-alpine
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 15
+
+  coordinator:
+    image: pinglens:local
+    build: .
+    environment:
+      PINGLENS_MODE: coordinator
+      PINGLENS_LISTEN: :8080
+      PINGLENS_METRICS_LISTEN: :9090
+      PINGLENS_REGIONS: local
+      PINGLENS_AGENT_TOKENS: local=dev-token
+      PINGLENS_VALKEY_URL: redis://valkey:6379/0
+      PINGLENS_PING_COUNT: 10
+      PINGLENS_PING_INTERVAL: 1s
+      PINGLENS_PING_TIMEOUT: 2s
+      PINGLENS_JOB_DURATION: 20s
+      PINGLENS_MTR_CYCLES: 1
+      PINGLENS_MTR_MAX_TTL: 4
+      PINGLENS_MTR_INTERVAL: 20s
+    ports:
+      - "18080:8080"
+      - "19090:9090"
+    depends_on:
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 2s
+      timeout: 1s
+      retries: 15
+
+  agent:
+    image: pinglens:local
+    user: "0:0"
+    cap_add:
+      - NET_RAW
+    environment:
+      PINGLENS_MODE: agent
+      PINGLENS_COORDINATOR_URL: http://coordinator:8080
+      PINGLENS_AGENT_ID: local
+      PINGLENS_DISPLAY_NAME: Local Docker Agent
+      PINGLENS_AGENT_TOKEN: dev-token
+      PINGLENS_POLL_BACKOFF: 1s
+    depends_on:
+      coordinator:
+        condition: service_healthy

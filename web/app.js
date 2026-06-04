@@ -92,6 +92,29 @@
     row.chart.innerHTML = `<line class="chart-grid" x1="0" y1="${model.height - 2}" x2="${model.width}" y2="${model.height - 2}"></line>${lossBars}${lines}`;
   }
 
+  function traceRowsHTML(trace) {
+    const rows = Array.isArray(trace && trace.rows) ? trace.rows : [];
+    return rows.map(hop => `<tr><td>${hop.hop}</td><td>${escapeHTML(hop.host || '—')}</td><td>${escapeHTML(hop.address || '—')}</td><td>${asnCell(hop)}</td><td>${fmt(hop.loss_pct, '%')}</td><td>${hop.sent || '—'}</td><td>${fmt(hop.last_ms, ' ms')}</td><td>${fmt(hop.avg_ms, ' ms')}</td><td>${fmt(hop.best_ms, ' ms')}</td><td>${fmt(hop.worst_ms, ' ms')}</td></tr>`).join('');
+  }
+
+  function renderTrace(row) {
+    const button = row.tr.querySelector('.expand');
+    button.disabled = false;
+    button.textContent = 'MTR';
+    if (row.trace.error) {
+      row.details.querySelector('.trace-output').innerHTML = `<p class="bad">${escapeHTML(row.trace.error)}</p>`;
+      return;
+    }
+    const rowsHTML = traceRowsHTML(row.trace);
+    row.details.querySelector('.trace-output').innerHTML = `<div class="trace-scroll"><table class="trace-table"><thead><tr><th>Hop</th><th>Host</th><th>IP</th><th>ASN</th><th>Loss</th><th>Snt</th><th>Last</th><th>Avg</th><th>Best</th><th>Worst</th></tr></thead><tbody>${rowsHTML}</tbody></table></div>`;
+  }
+
+  function asnCell(hop) {
+    if (!hop.asn) return '—';
+    const name = hop.as_name || '';
+    return `<span class="asn" title="${escapeHTML(name)}">${escapeHTML(hop.asn)}</span>${name ? ` <span class="as-name">${escapeHTML(name)}</span>` : ''}`;
+  }
+
   function installUI(document) {
     const form = document.querySelector('#probe-form');
     if (!form) return;
@@ -117,9 +140,15 @@
       const id = typeof region === 'object' && region !== null ? region.id : region;
       if (rows.has(id)) return rows.get(id);
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td><span class="region-name">${escapeHTML(regionName(region))}</span></td><td class="status muted">queued</td><td class="chart-cell"><svg class="probe-chart" role="img" aria-label="No ping samples yet" viewBox="0 0 ${CHART_WIDTH} ${CHART_HEIGHT}" preserveAspectRatio="none"></svg></td><td class="sent mono">0</td><td class="recv mono">0</td><td class="loss mono">—</td><td class="last mono">—</td><td class="min mono">—</td><td class="avg mono">—</td><td class="max mono">—</td>`;
+      tr.innerHTML = `<td><span class="region-name">${escapeHTML(regionName(region))}</span></td><td class="status muted">queued</td><td class="chart-cell"><svg class="probe-chart" role="img" aria-label="No ping samples yet" viewBox="0 0 ${CHART_WIDTH} ${CHART_HEIGHT}" preserveAspectRatio="none"></svg></td><td class="sent mono">0</td><td class="recv mono">0</td><td class="loss mono">—</td><td class="last mono">—</td><td class="min mono">—</td><td class="avg mono">—</td><td class="max mono">—</td><td><button class="secondary expand" disabled>MTR</button></td>`;
+      const details = document.createElement('tr');
+      details.className = 'details-row';
+      details.hidden = true;
+      details.innerHTML = '<td colspan="11"><div class="trace-output muted mono">MTR details pending.</div></td>';
       resultsBody.appendChild(tr);
-      const state = { id, tr, chart: tr.querySelector('.probe-chart'), samples: [], sent: 0, recv: 0 };
+      resultsBody.appendChild(details);
+      const state = { id, tr, details, chart: tr.querySelector('.probe-chart'), samples: [], sent: 0, recv: 0, trace: null };
+      tr.querySelector('.expand').addEventListener('click', () => { details.hidden = !details.hidden; });
       renderChart(state);
       rows.set(id, state);
       return state;
@@ -164,6 +193,9 @@
         row.tr.querySelector('.min').textContent = fmt(event.summary.min_ms, ' ms');
         row.tr.querySelector('.avg').textContent = fmt(event.summary.avg_ms, ' ms');
         row.tr.querySelector('.max').textContent = fmt(event.summary.max_ms, ' ms');
+      } else if (event.type === 'trace' && event.trace) {
+        row.trace = event.trace;
+        renderTrace(row);
       } else if (event.type === 'complete') {
         row.done = true;
         status.textContent = 'complete';
@@ -227,7 +259,7 @@
       source.onerror = () => {
         message.textContent = 'Event stream disconnected; refresh or start a new test.';
       };
-      for (const type of ['start', 'ping', 'summary', 'complete', 'offline', 'busy', 'error']) {
+      for (const type of ['start', 'ping', 'summary', 'trace', 'complete', 'offline', 'busy', 'error']) {
         source.addEventListener(type, e => applyEvent(JSON.parse(e.data)));
       }
       source.addEventListener('canceled', () => {
@@ -263,7 +295,7 @@
     return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
   }
 
-  const exported = { buildChartModel, chartSampleFromPing };
+  const exported = { buildChartModel, chartSampleFromPing, traceRowsHTML };
   if (typeof module !== 'undefined' && module.exports) module.exports = exported;
   if (typeof window !== 'undefined') window.PingLensChart = exported;
   if (typeof document !== 'undefined') installUI(document);
