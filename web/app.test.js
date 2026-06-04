@@ -11,18 +11,30 @@ test('chartSampleFromPing treats failed pings as loss samples', () => {
   assert.deepEqual(chartSampleFromPing({ success: false, error: 'timeout' }), { success: false, rtt: NaN });
 });
 
-test('buildChartModel stops latency line at loss bar edges', () => {
+test('buildChartModel uses one filled time slot per loss sample', () => {
   const model = buildChartModel([
     { success: true, rtt: 10 },
     { success: false, rtt: NaN },
     { success: true, rtt: 20 },
   ], 100, 20);
 
-  assert.deepEqual(model.segments, [['0,10', '47,10'], ['53,2', '100,2']]);
-  assert.deepEqual(model.losses, [{ x: 47, width: 6 }]);
+  assert.deepEqual(model.segments, [['95,10', '95.84,10', '96.67,10'], ['98.33,2', '99.17,2', '100,2']]);
+  assert.deepEqual(model.losses, [{ x: 96.67, width: 1.66 }]);
   assert.equal(model.successCount, 2);
   assert.equal(model.lossCount, 1);
   assert.match(model.label, /3 ping samples, 2 received, 1 lost/);
+});
+
+test('buildChartModel renders consecutive losses without gaps', () => {
+  const model = buildChartModel([
+    { success: true, rtt: 10 },
+    { success: false, rtt: NaN },
+    { success: false, rtt: NaN },
+    { success: true, rtt: 20 },
+  ], 100, 20);
+
+  assert.deepEqual(model.losses, [{ x: 95, width: 1.67 }, { x: 96.67, width: 1.66 }]);
+  assert.deepEqual(model.segments, [['93.33,10', '94.17,10', '95,10'], ['98.33,2', '99.17,2', '100,2']]);
 });
 
 test('buildChartModel defaults to a compact chart width', () => {
@@ -31,13 +43,13 @@ test('buildChartModel defaults to a compact chart width', () => {
   assert.equal(model.width, 130);
 });
 
-test('buildChartModel keeps the most recent chart samples', () => {
-  const samples = Array.from({ length: 602 }, (_, i) => ({ success: true, rtt: i + 1 }));
+test('buildChartModel keeps the most recent sixty chart samples', () => {
+  const samples = Array.from({ length: 62 }, (_, i) => ({ success: true, rtt: i + 1 }));
   const model = buildChartModel(samples, 100, 20);
 
-  assert.equal(model.sampleCount, 600);
-  assert.equal(model.maxRTT, 602);
-  assert.equal(model.successCount, 600);
+  assert.equal(model.sampleCount, 60);
+  assert.equal(model.maxRTT, 62);
+  assert.equal(model.successCount, 60);
 });
 
 test('traceRowsHTML escapes MTR host and ASN data', () => {

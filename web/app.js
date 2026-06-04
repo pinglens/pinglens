@@ -3,7 +3,7 @@
 
   const CHART_WIDTH = 130;
   const CHART_HEIGHT = 44;
-  const MAX_CHART_SAMPLES = 600;
+  const MAX_CHART_SAMPLES = 60;
 
   function fmt(value, suffix = '') {
     if (value === undefined || value === null || Number.isNaN(Number(value))) return '—';
@@ -41,17 +41,17 @@
     const losses = [];
     let current = [];
     let currentY;
-    let previousLossEnd;
     let successCount = 0;
     let lossCount = 0;
     const sampleCount = visible.length;
-    const step = sampleCount > 1 ? width / (sampleCount - 1) : 0;
-    const barWidth = sampleCount > 0 ? Math.max(1, Math.min(6, width / sampleCount)) : 0;
+    const slotWidth = width / MAX_CHART_SAMPLES;
+    const chartStart = width - slotWidth * sampleCount;
     const plotTop = 2;
     const plotHeight = Math.max(1, height - 4);
 
-    function flushSegment() {
+    function flushSegment(endX) {
       if (current.length > 0) {
+        current.push(`${endX},${currentY}`);
         segments.push(current);
         current = [];
         currentY = undefined;
@@ -60,29 +60,25 @@
 
     for (let i = 0; i < sampleCount; i++) {
       const sample = visible[i];
-      const x = sampleCount > 1 ? i * step : width / 2;
+      const slotStart = roundCoord(chartStart + i * slotWidth);
+      const slotEnd = roundCoord(chartStart + (i + 1) * slotWidth);
       if (sample && sample.success === true && Number.isFinite(sample.rtt) && sample.rtt >= 0) {
         successCount++;
         const ratio = clamp(sample.rtt / maxRTT, 0, 1);
         const y = roundCoord(plotTop + (1 - ratio) * plotHeight);
-        if (current.length === 0 && previousLossEnd !== undefined) current.push(`${previousLossEnd},${y}`);
-        current.push(`${roundCoord(x)},${y}`);
+        if (current.length === 0) current.push(`${slotStart},${y}`);
+        current.push(`${roundCoord(slotStart + (slotEnd - slotStart) / 2)},${y}`);
         currentY = y;
-        previousLossEnd = undefined;
         continue;
       }
       lossCount++;
-      const lossX = roundCoord(clamp(x - barWidth / 2, 0, Math.max(0, width - barWidth)));
-      const lossWidth = roundCoord(barWidth);
-      if (current.length > 0) current.push(`${lossX},${currentY}`);
-      flushSegment();
-      previousLossEnd = roundCoord(lossX + lossWidth);
+      flushSegment(slotStart);
       losses.push({
-        x: lossX,
-        width: lossWidth,
+        x: slotStart,
+        width: roundCoord(slotEnd - slotStart),
       });
     }
-    flushSegment();
+    flushSegment(width);
 
     let label = 'No ping samples yet';
     if (sampleCount > 0) {
@@ -150,7 +146,7 @@
       const id = typeof region === 'object' && region !== null ? region.id : region;
       if (rows.has(id)) return rows.get(id);
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td><span class="region-name">${escapeHTML(regionName(region))}</span></td><td class="status muted">queued</td><td class="chart-cell"><svg class="probe-chart" role="img" aria-label="No ping samples yet" viewBox="0 0 ${CHART_WIDTH} ${CHART_HEIGHT}" preserveAspectRatio="none"></svg></td><td class="count mono">0</td><td class="loss mono">—</td><td class="min mono">—</td><td class="avg mono">—</td><td class="max mono">—</td><td><button class="secondary expand" disabled>MTR</button></td>`;
+      tr.innerHTML = `<td><span class="region-name">${escapeHTML(regionName(region))}</span><span class="resolved-address muted mono" hidden></span></td><td class="status muted">queued</td><td class="chart-cell"><svg class="probe-chart" role="img" aria-label="No ping samples yet" viewBox="0 0 ${CHART_WIDTH} ${CHART_HEIGHT}" preserveAspectRatio="none"></svg></td><td class="count mono">0</td><td class="loss mono">—</td><td class="min mono">—</td><td class="avg mono">—</td><td class="max mono">—</td><td><button class="secondary expand" disabled>MTR</button></td>`;
       const details = document.createElement('tr');
       details.className = 'details-row';
       details.hidden = true;
@@ -166,7 +162,12 @@
 
     function applyEvent(event) {
       const row = ensureRow(event.cluster_id);
-      if (event.resolved) row.tr.querySelector('.region-name').title = event.resolved;
+      if (event.resolved) {
+        const resolved = row.tr.querySelector('.resolved-address');
+        resolved.textContent = event.resolved;
+        resolved.hidden = false;
+        row.tr.querySelector('.region-name').title = event.resolved;
+      }
       const status = row.tr.querySelector('.status');
       if (event.type === 'offline' || event.type === 'busy' || event.type === 'error') {
         row.done = true;

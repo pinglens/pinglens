@@ -65,6 +65,7 @@ tr.details-row td { background: rgb(255 255 255 / 2%); padding: 8px 10px; white-
 .bad { color: var(--bad); }
 .warn { color: var(--warn); }
 .region-name { display: block; font-weight: 700; }
+.resolved-address { display: block; font-size: 12px; margin-top: 4px; }
 .footer { display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--muted); font-size: 13px; padding: 4px 0 0; }
 .footer-separator { color: color-mix(in srgb, var(--muted) 65%, transparent); }
 .brand-link { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); text-decoration: none; }
