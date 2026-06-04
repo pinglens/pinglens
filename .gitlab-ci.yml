@@ -13,7 +13,7 @@ stages:
 go-test:
   extends: .rules_push_or_merge_request
   stage: test
-  image: golang:1.23-alpine
+  image: golang:1.26.4-alpine
   script:
     - go test ./...
 
