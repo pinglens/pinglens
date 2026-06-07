@@ -1,8 +1,11 @@
 package mtr
 
 import (
+	"context"
+	"errors"
 	"net/netip"
 	"testing"
+	"time"
 )
 
 func TestBuildArgsUsesFixedFlags(t *testing.T) {
@@ -13,6 +16,22 @@ func TestBuildArgsUsesFixedFlags(t *testing.T) {
 	}
 	if joined != "--report --json --show-ips --report-cycles 15 --max-ttl 30 8.8.8.8 " {
 		t.Fatalf("unexpected args: %q", joined)
+	}
+}
+
+func TestTimeoutErrorReplacesRawContextDeadline(t *testing.T) {
+	parent := context.Background()
+	runCtx, cancel := context.WithTimeout(parent, time.Nanosecond)
+	defer cancel()
+	<-runCtx.Done()
+
+	err := mtrContextError(parent, runCtx, 30*time.Second)
+	var timeoutErr TimeoutError
+	if !errors.As(err, &timeoutErr) {
+		t.Fatalf("expected TimeoutError, got %T %v", err, err)
+	}
+	if err.Error() != "MTR timed out after 30s" {
+		t.Fatalf("unexpected timeout message: %q", err.Error())
 	}
 }
 

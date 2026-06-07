@@ -25,8 +25,16 @@ type Config struct {
 	OutputLimit int64
 }
 
+type TimeoutError struct {
+	Timeout time.Duration
+}
+
+func (e TimeoutError) Error() string {
+	return fmt.Sprintf("MTR timed out after %s", e.Timeout)
+}
+
 func DefaultConfig() Config {
-	return Config{Cycles: 10, MaxTTL: 30, Timeout: 20 * time.Second, OutputLimit: 256 * 1024}
+	return Config{Cycles: 10, MaxTTL: 30, Timeout: 55 * time.Second, OutputLimit: 256 * 1024}
 }
 
 func BuildArgs(target string, cfg Config) []string {
@@ -73,14 +81,17 @@ func Run(ctx context.Context, binary string, target string, cfg Config) (protoco
 	data, readErr := io.ReadAll(limited)
 	waitErr := cmd.Wait()
 	if readErr != nil {
+		if err := mtrContextError(ctx, runCtx, cfg.Timeout); err != nil {
+			return protocol.TraceReport{}, err
+		}
 		return protocol.TraceReport{}, readErr
 	}
 	if int64(len(data)) > cfg.OutputLimit {
 		return protocol.TraceReport{}, fmt.Errorf("mtr output exceeded %d bytes", cfg.OutputLimit)
 	}
 	if waitErr != nil {
-		if runCtx.Err() != nil {
-			return protocol.TraceReport{}, runCtx.Err()
+		if err := mtrContextError(ctx, runCtx, cfg.Timeout); err != nil {
+			return protocol.TraceReport{}, err
 		}
 		if stderr.Len() > 0 {
 			return protocol.TraceReport{}, fmt.Errorf("%w: %s", waitErr, stderr.String())
@@ -93,6 +104,16 @@ func Run(ctx context.Context, binary string, target string, cfg Config) (protoco
 	}
 	enrichASN(runCtx, nil, &report)
 	return report, nil
+}
+
+func mtrContextError(parent context.Context, runCtx context.Context, timeout time.Duration) error {
+	if parent.Err() != nil {
+		return parent.Err()
+	}
+	if runCtx.Err() != nil {
+		return TimeoutError{Timeout: timeout}
+	}
+	return nil
 }
 
 func ParseJSON(data []byte) (protocol.TraceReport, error) {

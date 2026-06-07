@@ -274,7 +274,7 @@ func mtrTimeout(job protocol.ProbeJob) time.Duration {
 	if cycles <= 0 {
 		cycles = 10
 	}
-	return time.Duration(cycles+10) * time.Second
+	return time.Duration(cycles)*time.Second + 45*time.Second
 }
 
 func millis(duration time.Duration) float64 {
