@@ -12,6 +12,12 @@ branding:
   providerName: ""
   providerURL: ""
   providerLogoURL: ""
+  # Optional UI palette overrides as hex colors (e.g. "#2563eb").
+  # Empty values keep PingLens' built-in defaults.
+  theme:
+    accent: ""
+    accentSecondary: ""
+    background: ""
 
 serviceAccount:
   create: true
