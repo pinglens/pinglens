@@ -276,7 +276,9 @@ func lookupASName(ctx context.Context, resolver *net.Resolver, asn string) strin
 func lookupCymruTXT(ctx context.Context, resolver *net.Resolver, query string) []string {
 	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
 	defer cancel()
-	txts, err := resolver.LookupTXT(ctx, query)
+	// Query the rooted name so resolv.conf search domains (Kubernetes uses
+	// ndots:5) are not tried first; each miss would eat into lookupTimeout.
+	txts, err := resolver.LookupTXT(ctx, query+".")
 	if err != nil {
 		return nil
 	}
