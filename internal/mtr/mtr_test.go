@@ -3,9 +3,14 @@ package mtr
 import (
 	"context"
 	"errors"
+	"net"
 	"net/netip"
 	"testing"
 	"time"
+
+	"golang.org/x/net/dns/dnsmessage"
+
+	"github.com/pinglens/pinglens/internal/protocol"
 )
 
 func TestBuildArgsUsesFixedFlags(t *testing.T) {
@@ -14,7 +19,7 @@ func TestBuildArgsUsesFixedFlags(t *testing.T) {
 	for _, arg := range args {
 		joined += arg + " "
 	}
-	if joined != "--report --json --show-ips --report-cycles 15 --max-ttl 30 8.8.8.8 " {
+	if joined != "--report --json --no-dns --report-cycles 15 --max-ttl 30 8.8.8.8 " {
 		t.Fatalf("unexpected args: %q", joined)
 	}
 }
@@ -57,6 +62,80 @@ func TestASNQuery(t *testing.T) {
 	}
 	if got := asnQuery(mustAddr("2001:db8::1")); got == "" || got[len(got)-21:] != "origin6.asn.cymru.com" {
 		t.Fatalf("unexpected IPv6 query: %s", got)
+	}
+}
+
+// TestEnrichHopsBoundsSlowReverseDNS covers the reason mtr runs with
+// --no-dns: one hop whose PTR server never answers must not hold back the
+// trace or the names of the other hops.
+func TestEnrichHopsBoundsSlowReverseDNS(t *testing.T) {
+	previous := lookupTimeout
+	lookupTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { lookupTimeout = previous })
+
+	resolver := fakePTRResolver(t, map[string]string{"1.2.0.192.in-addr.arpa.": "gw.example.net."})
+	report := protocol.TraceReport{Rows: []protocol.TraceRow{
+		{Hop: 1, Address: "192.0.2.1"},
+		{Hop: 2, Address: "192.0.2.2"},
+		{Hop: 3},
+	}}
+
+	started := time.Now()
+	enrichHops(context.Background(), resolver, &report)
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("enrichHops took %s; slow PTR lookup was not bounded", elapsed)
+	}
+	if got := report.Rows[0].Host; got != "gw.example.net" {
+		t.Fatalf("resolved hop host = %q, want gw.example.net", got)
+	}
+	if got := report.Rows[1].Host; got != "" {
+		t.Fatalf("unanswered hop host = %q, want empty", got)
+	}
+}
+
+// fakePTRResolver answers PTR queries from names and silently drops every
+// other query, like an unresponsive authoritative server.
+func fakePTRResolver(t *testing.T, names map[string]string) *net.Resolver {
+	t.Helper()
+	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	go func() {
+		buf := make([]byte, 512)
+		for {
+			n, from, err := conn.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			var msg dnsmessage.Message
+			if err := msg.Unpack(buf[:n]); err != nil || len(msg.Questions) != 1 {
+				continue
+			}
+			question := msg.Questions[0]
+			name, ok := names[question.Name.String()]
+			if question.Type != dnsmessage.TypePTR || !ok {
+				continue
+			}
+			msg.Header.Response = true
+			msg.Answers = []dnsmessage.Resource{{
+				Header: dnsmessage.ResourceHeader{Name: question.Name, Type: dnsmessage.TypePTR, Class: dnsmessage.ClassINET, TTL: 60},
+				Body:   &dnsmessage.PTRResource{PTR: dnsmessage.MustNewName(name)},
+			}}
+			packed, err := msg.Pack()
+			if err != nil {
+				continue
+			}
+			_, _ = conn.WriteTo(packed, from)
+		}
+	}()
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var dialer net.Dialer
+			return dialer.DialContext(ctx, "udp", conn.LocalAddr().String())
+		},
 	}
 }
 

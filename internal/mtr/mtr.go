@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pinglens/pinglens/internal/protocol"
@@ -47,7 +48,9 @@ func BuildArgs(target string, cfg Config) []string {
 	return []string{
 		"--report",
 		"--json",
-		"--show-ips",
+		// Reverse DNS happens in enrichHops with bounded lookups; mtr's own
+		// resolver delays the whole report until slow PTR servers answer.
+		"--no-dns",
 		"--report-cycles", strconv.Itoa(cfg.Cycles),
 		"--max-ttl", strconv.Itoa(cfg.MaxTTL),
 		target,
@@ -102,7 +105,7 @@ func Run(ctx context.Context, binary string, target string, cfg Config) (protoco
 	if err != nil {
 		return protocol.TraceReport{}, err
 	}
-	enrichASN(runCtx, nil, &report)
+	enrichHops(ctx, nil, &report)
 	return report, nil
 }
 
@@ -176,22 +179,39 @@ func splitHostAddress(value string) (string, string) {
 	return value, ""
 }
 
-func enrichASN(ctx context.Context, resolver *net.Resolver, report *protocol.TraceReport) {
+// lookupTimeout bounds each hop's PTR and ASN lookup so a slow or broken DNS
+// server only costs that hop its annotation, never the whole trace.
+var lookupTimeout = 2 * time.Second
+
+func enrichHops(ctx context.Context, resolver *net.Resolver, report *protocol.TraceReport) {
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}
+	var wg sync.WaitGroup
 	for i := range report.Rows {
-		if report.Rows[i].Address == "" {
+		row := &report.Rows[i]
+		addr, err := netip.ParseAddr(row.Address)
+		if err != nil {
 			continue
 		}
-		addr, err := netip.ParseAddr(report.Rows[i].Address)
-		if err != nil || !target.AddressAllowed(addr) {
-			continue
+		if row.Host == "" {
+			wg.Go(func() { row.Host = lookupHost(ctx, resolver, addr) })
 		}
-		asn, name := lookupASN(ctx, resolver, addr)
-		report.Rows[i].ASN = asn
-		report.Rows[i].ASName = name
+		if target.AddressAllowed(addr) {
+			wg.Go(func() { row.ASN, row.ASName = lookupASN(ctx, resolver, addr) })
+		}
 	}
+	wg.Wait()
+}
+
+func lookupHost(ctx context.Context, resolver *net.Resolver, addr netip.Addr) string {
+	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	defer cancel()
+	names, err := resolver.LookupAddr(ctx, addr.String())
+	if err != nil || len(names) == 0 {
+		return ""
+	}
+	return strings.TrimSuffix(names[0], ".")
 }
 
 func lookupASN(ctx context.Context, resolver *net.Resolver, addr netip.Addr) (string, string) {
@@ -199,6 +219,8 @@ func lookupASN(ctx context.Context, resolver *net.Resolver, addr netip.Addr) (st
 	if query == "" {
 		return "", ""
 	}
+	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	defer cancel()
 	txts, err := resolver.LookupTXT(ctx, query)
 	if err != nil {
 		return "", ""
