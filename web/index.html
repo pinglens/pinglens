@@ -4,19 +4,34 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ .AppName }}</title>
+  {{- if .BrandLogoURL }}
+  <link rel="icon" href="{{ .BrandLogoURL }}">
+  {{- end }}
+  <link rel="preload" href="/fonts/ibm-plex-sans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/barlow-condensed-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
+  {{- with .Theme }}{{ if not .IsZero }}
+  <style>
+    :root {
+      {{- if .Accent }} --accent: {{ .Accent }};{{ end }}
+      {{- if .AccentSecondary }} --accent-2: {{ .AccentSecondary }};{{ end }}
+      {{- if .Background }} --bg: {{ .Background }};{{ end }}
+    }
+  </style>
+  {{- end }}{{ end }}
 </head>
 <body>
   <main class="shell">
-    <section class="hero">
+    <section class="card hero">
+      <h1 class="app-name">{{ .AppName }}</h1>
       <form id="probe-form" class="probe-form">
-        <input id="target" name="target" autocomplete="off" spellcheck="false" placeholder="example.com or 203.0.113.10" required>
+        <input id="target" name="target" autocomplete="off" spellcheck="false" placeholder="example.com or 203.0.113.10" aria-label="Target host or IP address" required>
         <button type="submit">Start test</button>
       </form>
       <p id="message" class="message"></p>
     </section>
 
-    <section class="results-card">
+    <section class="card results-card">
       <div class="card-heading">
         <h2>Results</h2>
         <div class="job-actions">

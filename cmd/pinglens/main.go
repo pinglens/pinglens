@@ -55,17 +55,26 @@ func hasAgentConfig() bool {
 }
 
 func runCoordinator(ctx context.Context, logger *slog.Logger) error {
+	ui, err := web.Handler(web.Config{
+		AppName:      env("PINGLENS_APP_NAME", "PingLens"),
+		BrandName:    os.Getenv("PINGLENS_BRAND_NAME"),
+		BrandURL:     os.Getenv("PINGLENS_BRAND_URL"),
+		BrandLogoURL: os.Getenv("PINGLENS_BRAND_LOGO_URL"),
+		Theme: web.Theme{
+			Accent:          strings.TrimSpace(os.Getenv("PINGLENS_THEME_ACCENT")),
+			AccentSecondary: strings.TrimSpace(os.Getenv("PINGLENS_THEME_ACCENT_SECONDARY")),
+			Background:      strings.TrimSpace(os.Getenv("PINGLENS_THEME_BACKGROUND")),
+		},
+	})
+	if err != nil {
+		return err
+	}
 	cfg := coordinator.Config{
-		ListenAddr:        env("PINGLENS_LISTEN", ":8080"),
-		MetricsListenAddr: env("PINGLENS_METRICS_LISTEN", ":9090"),
-		Regions:           splitCSV(os.Getenv("PINGLENS_REGIONS")),
-		AgentTokens:       parseTokens(os.Getenv("PINGLENS_AGENT_TOKENS")),
-		UI: web.Handler(web.Config{
-			AppName:      env("PINGLENS_APP_NAME", "PingLens"),
-			BrandName:    os.Getenv("PINGLENS_BRAND_NAME"),
-			BrandURL:     os.Getenv("PINGLENS_BRAND_URL"),
-			BrandLogoURL: os.Getenv("PINGLENS_BRAND_LOGO_URL"),
-		}),
+		ListenAddr:             env("PINGLENS_LISTEN", ":8080"),
+		MetricsListenAddr:      env("PINGLENS_METRICS_LISTEN", ":9090"),
+		Regions:                splitCSV(os.Getenv("PINGLENS_REGIONS")),
+		AgentTokens:            parseTokens(os.Getenv("PINGLENS_AGENT_TOKENS")),
+		UI:                     ui,
 		PingCount:              envIntAllowZero("PINGLENS_PING_COUNT", 0),
 		PingInterval:           envDuration("PINGLENS_PING_INTERVAL", time.Second),
 		PingTimeout:            envDuration("PINGLENS_PING_TIMEOUT", 3*time.Second),
