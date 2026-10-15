@@ -4,6 +4,7 @@
   const CHART_WIDTH = 130;
   const CHART_HEIGHT = 44;
   const MAX_CHART_SAMPLES = 60;
+  const MAX_AS_NAME_LENGTH = 24;
 
   function fmt(value, suffix = '') {
     if (value === undefined || value === null || Number.isNaN(Number(value))) return '—';
@@ -115,10 +116,24 @@
     row.details.querySelector('.trace-output').innerHTML = `<div class="trace-scroll"><table class="trace-table"><thead><tr><th>Hop</th><th>Host</th><th>IP</th><th>ASN</th><th>Loss</th><th>Snt</th><th>Last</th><th>Avg</th><th>Best</th><th>Worst</th></tr></thead><tbody>${rowsHTML}</tbody></table></div>`;
   }
 
+  // Team Cymru AS names read "HANDLE - Organization, CC". The table shows the
+  // short handle with the organization as a tooltip; names without that
+  // separator are shown whole. Either is cut to MAX_AS_NAME_LENGTH to keep the
+  // column narrow, and a cut name's tooltip carries the full name instead.
+  function splitASName(name) {
+    const sep = name.indexOf(' - ');
+    if (sep < 0) return { handle: name.trim(), org: '' };
+    return { handle: name.slice(0, sep).trim(), org: name.slice(sep + 3).trim() };
+  }
+
   function asnCell(hop) {
     if (!hop.asn) return '—';
-    const name = hop.as_name || '';
-    return `<span class="asn" title="${escapeHTML(name)}">${escapeHTML(hop.asn)}</span>${name ? ` <span class="as-name">${escapeHTML(name)}</span>` : ''}`;
+    const name = (hop.as_name || '').trim();
+    const { handle, org } = splitASName(name);
+    const truncated = handle.length > MAX_AS_NAME_LENGTH;
+    const shown = truncated ? `${handle.slice(0, MAX_AS_NAME_LENGTH - 3)}...` : handle;
+    const title = truncated ? name : org;
+    return `<span class="asn"${title ? ` title="${escapeHTML(title)}"` : ''}>${escapeHTML(hop.asn)}${shown ? ` <span class="as-name">${escapeHTML(shown)}</span>` : ''}</span>`;
   }
 
   function installUI(document) {

@@ -187,6 +187,7 @@ func enrichHops(ctx context.Context, resolver *net.Resolver, report *protocol.Tr
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}
+	names := asNames{entries: map[string]*asNameEntry{}}
 	var wg sync.WaitGroup
 	for i := range report.Rows {
 		row := &report.Rows[i]
@@ -198,10 +199,39 @@ func enrichHops(ctx context.Context, resolver *net.Resolver, report *protocol.Tr
 			wg.Go(func() { row.Host = lookupHost(ctx, resolver, addr) })
 		}
 		if target.AddressAllowed(addr) {
-			wg.Go(func() { row.ASN, row.ASName = lookupASN(ctx, resolver, addr) })
+			wg.Go(func() {
+				row.ASN = lookupASN(ctx, resolver, addr)
+				if row.ASN != "" {
+					row.ASName = names.lookup(ctx, resolver, row.ASN)
+				}
+			})
 		}
 	}
 	wg.Wait()
+}
+
+// asNames resolves each AS name once per trace; consecutive hops usually
+// share an ASN.
+type asNames struct {
+	mu      sync.Mutex
+	entries map[string]*asNameEntry
+}
+
+type asNameEntry struct {
+	once sync.Once
+	name string
+}
+
+func (n *asNames) lookup(ctx context.Context, resolver *net.Resolver, asn string) string {
+	n.mu.Lock()
+	entry := n.entries[asn]
+	if entry == nil {
+		entry = &asNameEntry{}
+		n.entries[asn] = entry
+	}
+	n.mu.Unlock()
+	entry.once.Do(func() { entry.name = lookupASName(ctx, resolver, asn) })
+	return entry.name
 }
 
 func lookupHost(ctx context.Context, resolver *net.Resolver, addr netip.Addr) string {
@@ -214,33 +244,52 @@ func lookupHost(ctx context.Context, resolver *net.Resolver, addr netip.Addr) st
 	return strings.TrimSuffix(names[0], ".")
 }
 
-func lookupASN(ctx context.Context, resolver *net.Resolver, addr netip.Addr) (string, string) {
+// lookupASN returns the origin ASN for addr ("AS15169") from Team Cymru's
+// "ASN | prefix | CC | registry | allocated" TXT record.
+func lookupASN(ctx context.Context, resolver *net.Resolver, addr netip.Addr) string {
 	query := asnQuery(addr)
 	if query == "" {
-		return "", ""
+		return ""
 	}
+	fields := lookupCymruTXT(ctx, resolver, query)
+	if len(fields) == 0 {
+		return ""
+	}
+	// Multi-origin prefixes list several space-separated ASNs; keep the first.
+	origins := strings.Fields(fields[0])
+	if len(origins) == 0 {
+		return ""
+	}
+	return "AS" + origins[0]
+}
+
+// lookupASName returns the AS description from Team Cymru's
+// "ASN | CC | registry | allocated | name" TXT record for asn ("AS15169").
+func lookupASName(ctx context.Context, resolver *net.Resolver, asn string) string {
+	fields := lookupCymruTXT(ctx, resolver, asn+".asn.cymru.com")
+	if len(fields) < 5 {
+		return ""
+	}
+	return fields[4]
+}
+
+func lookupCymruTXT(ctx context.Context, resolver *net.Resolver, query string) []string {
 	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
 	defer cancel()
 	txts, err := resolver.LookupTXT(ctx, query)
 	if err != nil {
-		return "", ""
+		return nil
 	}
 	for _, txt := range txts {
-		parts := strings.Split(txt, "|")
-		if len(parts) < 1 {
-			continue
+		fields := strings.Split(txt, "|")
+		for i := range fields {
+			fields[i] = strings.TrimSpace(fields[i])
 		}
-		asn := strings.TrimSpace(parts[0])
-		if asn == "" {
-			continue
+		if fields[0] != "" {
+			return fields
 		}
-		name := ""
-		if len(parts) >= 7 {
-			name = strings.TrimSpace(parts[6])
-		}
-		return "AS" + asn, name
 	}
-	return "", ""
+	return nil
 }
 
 func asnQuery(addr netip.Addr) string {

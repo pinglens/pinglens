@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"sync"
 	"testing"
 	"time"
 
@@ -73,7 +74,9 @@ func TestEnrichHopsBoundsSlowReverseDNS(t *testing.T) {
 	lookupTimeout = 300 * time.Millisecond
 	t.Cleanup(func() { lookupTimeout = previous })
 
-	resolver := fakePTRResolver(t, map[string]string{"1.2.0.192.in-addr.arpa.": "gw.example.net."})
+	resolver, _ := fakeResolver(t, map[string]dnsmessage.ResourceBody{
+		"1.2.0.192.in-addr.arpa.": &dnsmessage.PTRResource{PTR: dnsmessage.MustNewName("gw.example.net.")},
+	})
 	report := protocol.TraceReport{Rows: []protocol.TraceRow{
 		{Hop: 1, Address: "192.0.2.1"},
 		{Hop: 2, Address: "192.0.2.2"},
@@ -93,15 +96,48 @@ func TestEnrichHopsBoundsSlowReverseDNS(t *testing.T) {
 	}
 }
 
-// fakePTRResolver answers PTR queries from names and silently drops every
-// other query, like an unresponsive authoritative server.
-func fakePTRResolver(t *testing.T, names map[string]string) *net.Resolver {
+func TestEnrichHopsNamesEachASOnce(t *testing.T) {
+	previous := lookupTimeout
+	lookupTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { lookupTimeout = previous })
+
+	resolver, queries := fakeResolver(t, map[string]dnsmessage.ResourceBody{
+		"8.8.8.8.origin.asn.cymru.com.": txt("15169 | 8.8.8.0/24 | US | arin | 2023-12-28"),
+		"4.4.8.8.origin.asn.cymru.com.": txt("15169 | 8.8.4.0/24 | US | arin | 2023-12-28"),
+		"AS15169.asn.cymru.com.":        txt("15169 | US | arin | 2000-03-30 | GOOGLE - Google LLC, US"),
+	})
+	report := protocol.TraceReport{Rows: []protocol.TraceRow{
+		{Hop: 1, Address: "8.8.8.8"},
+		{Hop: 2, Address: "8.8.4.4"},
+	}}
+
+	enrichHops(context.Background(), resolver, &report)
+	for _, row := range report.Rows {
+		if row.ASN != "AS15169" || row.ASName != "GOOGLE - Google LLC, US" {
+			t.Fatalf("hop %d ASN = %q name = %q, want AS15169 GOOGLE - Google LLC, US", row.Hop, row.ASN, row.ASName)
+		}
+	}
+	if got := queries("AS15169.asn.cymru.com."); got != 1 {
+		t.Fatalf("AS name queried %d times, want once per trace", got)
+	}
+}
+
+func txt(value string) *dnsmessage.TXTResource {
+	return &dnsmessage.TXTResource{TXT: []string{value}}
+}
+
+// fakeResolver answers queries for the given names and silently drops every
+// other query, like an unresponsive authoritative server. The returned
+// function reports how many queries a name received.
+func fakeResolver(t *testing.T, records map[string]dnsmessage.ResourceBody) (*net.Resolver, func(string) int) {
 	t.Helper()
 	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { conn.Close() })
+	var mu sync.Mutex
+	counts := map[string]int{}
 	go func() {
 		buf := make([]byte, 512)
 		for {
@@ -114,14 +150,17 @@ func fakePTRResolver(t *testing.T, names map[string]string) *net.Resolver {
 				continue
 			}
 			question := msg.Questions[0]
-			name, ok := names[question.Name.String()]
-			if question.Type != dnsmessage.TypePTR || !ok {
+			mu.Lock()
+			counts[question.Name.String()]++
+			mu.Unlock()
+			body, ok := records[question.Name.String()]
+			if !ok || question.Type != recordType(body) {
 				continue
 			}
 			msg.Header.Response = true
 			msg.Answers = []dnsmessage.Resource{{
-				Header: dnsmessage.ResourceHeader{Name: question.Name, Type: dnsmessage.TypePTR, Class: dnsmessage.ClassINET, TTL: 60},
-				Body:   &dnsmessage.PTRResource{PTR: dnsmessage.MustNewName(name)},
+				Header: dnsmessage.ResourceHeader{Name: question.Name, Type: question.Type, Class: dnsmessage.ClassINET, TTL: 60},
+				Body:   body,
 			}}
 			packed, err := msg.Pack()
 			if err != nil {
@@ -130,13 +169,28 @@ func fakePTRResolver(t *testing.T, names map[string]string) *net.Resolver {
 			_, _ = conn.WriteTo(packed, from)
 		}
 	}()
-	return &net.Resolver{
+	resolver := &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var dialer net.Dialer
 			return dialer.DialContext(ctx, "udp", conn.LocalAddr().String())
 		},
 	}
+	return resolver, func(name string) int {
+		mu.Lock()
+		defer mu.Unlock()
+		return counts[name]
+	}
+}
+
+func recordType(body dnsmessage.ResourceBody) dnsmessage.Type {
+	switch body.(type) {
+	case *dnsmessage.PTRResource:
+		return dnsmessage.TypePTR
+	case *dnsmessage.TXTResource:
+		return dnsmessage.TypeTXT
+	}
+	panic("unsupported fake DNS record")
 }
 
 func mustAddr(value string) netip.Addr {

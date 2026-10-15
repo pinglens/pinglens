@@ -53,12 +53,12 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
 .chart-grid { stroke: color-mix(in srgb, var(--muted) 24%, transparent); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .chart-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: butt; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .chart-loss-bar { fill: color-mix(in srgb, var(--bad) 86%, transparent); }
-tr.details-row td { background: rgb(255 255 255 / 2%); padding: 8px 10px; white-space: normal; }
+tr.details-row > td { background: rgb(255 255 255 / 2%); padding: 8px 10px; white-space: normal; }
 .trace-output { font-size: 12px; line-height: 1.35; }
 .trace-scroll { max-width: 100%; overflow-x: auto; }
 .trace-table { margin: 4px 0; min-width: 860px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
 .trace-table th, .trace-table td { padding: 6px 8px; white-space: nowrap; }
-.as-name { color: var(--muted); display: inline-block; max-width: 14rem; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.as-name { color: var(--muted); }
 .muted { color: var(--muted); }
 .good { color: var(--accent); }
 .bad { color: var(--bad); }

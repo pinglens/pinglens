@@ -58,7 +58,7 @@ test('traceRowsHTML escapes MTR host and ASN data', () => {
     host: 'edge<1>',
     address: '192.0.2.1',
     asn: 'AS64500',
-    as_name: 'Example & Transit',
+    as_name: 'EXAMPLE<NET> - Example & Transit, Inc., US',
     loss_pct: 0,
     sent: 10,
     last_ms: 1.25,
@@ -68,6 +68,22 @@ test('traceRowsHTML escapes MTR host and ASN data', () => {
   }] });
 
   assert.match(html, /edge&lt;1&gt;/);
-  assert.match(html, /Example &amp; Transit/);
   assert.doesNotMatch(html, /edge<1>/);
+  assert.match(html, /<span class="asn" title="Example &amp; Transit, Inc., US">AS64500 <span class="as-name">EXAMPLE&lt;NET&gt;<\/span><\/span>/);
+});
+
+test('traceRowsHTML shows short AS names without an organization whole and without a tooltip', () => {
+  const html = traceRowsHTML({ rows: [{ hop: 1, address: '192.0.2.1', asn: 'AS64501', as_name: 'EXAMPLE-AS, CN' }] });
+
+  assert.match(html, /<span class="asn">AS64501 <span class="as-name">EXAMPLE-AS, CN<\/span><\/span>/);
+});
+
+test('traceRowsHTML truncates long AS names with the full name as the tooltip', () => {
+  const html = traceRowsHTML({ rows: [
+    { hop: 1, address: '192.0.2.1', asn: 'AS64501', as_name: 'EXAMPLE-AS No.1 Example Street, CN' },
+    { hop: 2, address: '192.0.2.2', asn: 'AS64502', as_name: 'EXAMPLE-VERY-LONG-TRANSIT-HANDLE - Example Transit, US' },
+  ] });
+
+  assert.match(html, /<span class="asn" title="EXAMPLE-AS No.1 Example Street, CN">AS64501 <span class="as-name">EXAMPLE-AS No.1 Examp...<\/span><\/span>/);
+  assert.match(html, /<span class="asn" title="EXAMPLE-VERY-LONG-TRANSIT-HANDLE - Example Transit, US">AS64502 <span class="as-name">EXAMPLE-VERY-LONG-TRA...<\/span><\/span>/);
 });
