@@ -24,6 +24,9 @@ serviceAccount:
   annotations: {}
   name: ""
 
+# Annotations on the coordinator and agent Deployments themselves, for
+# tools that read their settings from Deployment metadata.
+annotations: {}
 podAnnotations: {}
 podLabels: {}
 

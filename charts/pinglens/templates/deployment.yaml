@@ -6,6 +6,10 @@ metadata:
   labels:
     {{- include "pinglens.labels" . | nindent 4 }}
     app.kubernetes.io/component: coordinator
+  {{- with .Values.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   replicas: {{ .Values.coordinator.replicaCount }}
   selector:
@@ -104,6 +108,10 @@ metadata:
   labels:
     {{- include "pinglens.labels" . | nindent 4 }}
     app.kubernetes.io/component: agent
+  {{- with .Values.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   replicas: {{ .Values.agent.replicaCount }}
   selector:
