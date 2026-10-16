@@ -108,12 +108,71 @@
     const button = row.tr.querySelector('.expand');
     button.disabled = false;
     button.textContent = 'MTR';
+    row.details.querySelector('.copy-trace').hidden = Boolean(row.trace.error);
     if (row.trace.error) {
       row.details.querySelector('.trace-output').innerHTML = `<p class="bad">${escapeHTML(row.trace.error)}</p>`;
       return;
     }
     const rowsHTML = traceRowsHTML(row.trace);
     row.details.querySelector('.trace-output').innerHTML = `<div class="trace-scroll"><table class="trace-table"><thead><tr><th>Hop</th><th>Host</th><th>IP</th><th>ASN</th><th>Loss</th><th>Snt</th><th>Last</th><th>Avg</th><th>Best</th><th>Worst</th></tr></thead><tbody>${rowsHTML}</tbody></table></div>`;
+  }
+
+  function textNumber(value, digits) {
+    const number = Number(value);
+    if (value === undefined || value === null || !Number.isFinite(number)) return '-';
+    return number.toFixed(digits);
+  }
+
+  // formatTraceText renders a trace as a plain-text, mtr --report style table
+  // for pasting into tickets and chat. ASCII only; columns are padded to fit.
+  function formatTraceText(trace, meta = {}) {
+    const hops = Array.isArray(trace && trace.rows) ? trace.rows : [];
+    const header = ['HOP', 'HOST', 'ASN', 'LOSS%', 'SNT', 'LAST', 'AVG', 'BEST', 'WORST'];
+    const rightAligned = [true, false, false, true, true, true, true, true, true];
+    const body = hops.map(hop => {
+      let host = '???';
+      if (hop.host && hop.address) host = `${hop.host} (${hop.address})`;
+      else if (hop.address) host = hop.address;
+      else if (hop.host) host = hop.host;
+      const handle = splitASName((hop.as_name || '').trim()).handle;
+      const asn = hop.asn ? `${hop.asn}${handle ? ` ${handle}` : ''}` : '-';
+      const loss = textNumber(hop.loss_pct, 1);
+      return [
+        `${hop.hop}.`, host, asn, loss === '-' ? loss : `${loss}%`, hop.sent ? String(hop.sent) : '-',
+        textNumber(hop.last_ms, 2), textNumber(hop.avg_ms, 2), textNumber(hop.best_ms, 2), textNumber(hop.worst_ms, 2),
+      ];
+    });
+    const widths = header.map((title, i) => Math.max(title.length, ...body.map(cells => cells[i].length)));
+    const line = cells => cells.map((cell, i) => (rightAligned[i] ? cell.padStart(widths[i]) : cell.padEnd(widths[i]))).join('  ').trimEnd();
+
+    const lines = [];
+    const target = meta.target && meta.resolved && meta.target !== meta.resolved ? `${meta.target} (${meta.resolved})` : (meta.target || meta.resolved);
+    if (meta.region || target) lines.push(`MTR${meta.region ? ` from ${meta.region}` : ''}${target ? ` to ${target}` : ''}`);
+    const at = meta.at ? new Date(meta.at) : null;
+    if (at && !Number.isNaN(at.getTime())) lines.push(`${at.toISOString().slice(0, 19).replace('T', ' ')} UTC, times in ms`);
+    if (lines.length) lines.push('');
+    lines.push(line(header), ...body.map(line));
+    return `${lines.join('\n')}\n`;
+  }
+
+  async function copyText(document, text) {
+    const clipboard = document.defaultView && document.defaultView.navigator.clipboard;
+    if (clipboard && document.defaultView.isSecureContext) {
+      await clipboard.writeText(text);
+      return;
+    }
+    // The async clipboard API needs HTTPS; plain-HTTP deployments fall back
+    // to the legacy copy command on a temporary text area.
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    const copied = document.execCommand('copy');
+    area.remove();
+    if (!copied) throw new Error('copy command failed');
   }
 
   // Team Cymru AS names read "HANDLE - Organization, CC". The table shows the
@@ -148,6 +207,7 @@
     let rows = new Map();
     let regionNames = new Map();
     let currentJobID;
+    let currentTarget;
 
     function regionName(region) {
       if (typeof region === 'object' && region !== null) {
@@ -165,11 +225,25 @@
       const details = document.createElement('tr');
       details.className = 'details-row';
       details.hidden = true;
-      details.innerHTML = '<td colspan="9"><div class="trace-output muted mono">MTR details pending.</div></td>';
+      details.innerHTML = '<td colspan="9"><div class="trace-toolbar"><button class="secondary copy-trace" type="button" hidden>Copy</button></div><div class="trace-output muted mono">MTR details pending.</div></td>';
       resultsBody.appendChild(tr);
       resultsBody.appendChild(details);
       const state = { id, tr, details, chart: tr.querySelector('.probe-chart'), samples: [], trace: null };
       tr.querySelector('.expand').addEventListener('click', () => { details.hidden = !details.hidden; });
+      const copyButton = details.querySelector('.copy-trace');
+      let copyReset;
+      copyButton.addEventListener('click', async () => {
+        if (!state.trace) return;
+        const text = formatTraceText(state.trace, { region: regionName(id), target: currentTarget, resolved: state.resolved, at: state.traceAt });
+        try {
+          await copyText(document, text);
+          copyButton.textContent = 'Copied';
+        } catch {
+          copyButton.textContent = 'Copy failed';
+        }
+        clearTimeout(copyReset);
+        copyReset = setTimeout(() => { copyButton.textContent = 'Copy'; }, 1500);
+      });
       renderChart(state);
       rows.set(id, state);
       return state;
@@ -178,6 +252,7 @@
     function applyEvent(event) {
       const row = ensureRow(event.cluster_id);
       if (event.resolved) {
+        row.resolved = event.resolved;
         row.tr.querySelector('.resolved-address').textContent = event.resolved;
         row.tr.querySelector('.region-name').title = event.resolved;
       }
@@ -209,6 +284,7 @@
         row.tr.querySelector('.max').textContent = fmt(event.summary.max_ms, ' ms');
       } else if (event.type === 'trace' && event.trace) {
         row.trace = event.trace;
+        row.traceAt = event.at;
         renderTrace(row);
       } else if (event.type === 'complete') {
         row.done = true;
@@ -265,6 +341,7 @@
         window.history.replaceState({}, '', url);
       }
       message.textContent = `Testing ${data.target}...`;
+      currentTarget = data.target;
       currentJobID = data.job_id;
       stopJob.hidden = false;
       for (const region of data.regions) ensureRow(region);
@@ -309,7 +386,7 @@
     return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
   }
 
-  const exported = { buildChartModel, chartSampleFromPing, traceRowsHTML };
+  const exported = { buildChartModel, chartSampleFromPing, formatTraceText, traceRowsHTML };
   if (typeof module !== 'undefined' && module.exports) module.exports = exported;
   if (typeof window !== 'undefined') window.PingLensChart = exported;
   if (typeof document !== 'undefined') installUI(document);

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { buildChartModel, chartSampleFromPing, traceRowsHTML } = require('./app.js');
+const { buildChartModel, chartSampleFromPing, formatTraceText, traceRowsHTML } = require('./app.js');
 
 test('chartSampleFromPing preserves successful RTT samples', () => {
   assert.deepEqual(chartSampleFromPing({ success: true, rtt_ms: 12.5 }), { success: true, rtt: 12.5 });
@@ -86,4 +86,23 @@ test('traceRowsHTML truncates long AS names with the full name as the tooltip', 
 
   assert.match(html, /<span class="asn" title="EXAMPLE-AS No.1 Example Street, CN">AS64501 <span class="as-name">EXAMPLE-AS No.1 Examp...<\/span><\/span>/);
   assert.match(html, /<span class="asn" title="EXAMPLE-VERY-LONG-TRANSIT-HANDLE - Example Transit, US">AS64502 <span class="as-name">EXAMPLE-VERY-LONG-TRA...<\/span><\/span>/);
+});
+
+test('formatTraceText aligns an mtr-style report for monospace paste', () => {
+  const text = formatTraceText({ rows: [
+    { hop: 1, host: 'gw.example.net', address: '192.0.2.1', loss_pct: 0, sent: 10, last_ms: 0.13, avg_ms: 0.11, best_ms: 0.09, worst_ms: 0.13 },
+    { hop: 2, loss_pct: 100, sent: 10 },
+    { hop: 10, address: '8.8.8.8', asn: 'AS15169', as_name: 'GOOGLE - Google LLC, US', loss_pct: 0, sent: 10, last_ms: 12.5, avg_ms: 112.25, best_ms: 1, worst_ms: 130 },
+  ] }, { region: 'DFW (Dallas, US)', target: 'dns.google', resolved: '8.8.8.8', at: '2026-10-16T03:12:20.5Z' });
+
+  assert.equal(text, [
+    'MTR from DFW (Dallas, US) to dns.google (8.8.8.8)',
+    '2026-10-16 03:12:20 UTC, times in ms',
+    '',
+    'HOP  HOST                        ASN              LOSS%  SNT   LAST     AVG  BEST   WORST',
+    ' 1.  gw.example.net (192.0.2.1)  -                 0.0%   10   0.13    0.11  0.09    0.13',
+    ' 2.  ???                         -               100.0%   10      -       -     -       -',
+    '10.  8.8.8.8                     AS15169 GOOGLE    0.0%   10  12.50  112.25  1.00  130.00',
+    '',
+  ].join('\n'));
 });
