@@ -43,7 +43,6 @@ web-test:
   - cmd/pinglens/**/*
   - internal/agent/**/*
   - internal/coordinator/**/*
-  - internal/mtr/**/*
   - internal/ping/**/*
   - internal/protocol/**/*
   - internal/target/**/*

@@ -151,9 +151,9 @@ func TestHopNamesQueryEachASNameOnce(t *testing.T) {
 
 func newTestHopNames(t *testing.T) (*fakeDNS, *HopNames, *fakeClock) {
 	t.Helper()
-	previous := LookupTimeout
-	LookupTimeout = 200 * time.Millisecond
-	t.Cleanup(func() { LookupTimeout = previous })
+	previous := lookupTimeout
+	lookupTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { lookupTimeout = previous })
 	dns := newFakeDNS(t)
 	clock := &fakeClock{now: time.Unix(1_700_000_000, 0)}
 	names := NewHopNames(dns.resolver, time.Hour)

@@ -239,37 +239,15 @@ func (r *cachedLookup) store(value string, err error, now time.Time) {
 	}
 }
 
-// LookupTimeout bounds each hop's PTR and ASN lookup so a slow or broken DNS
+// lookupTimeout bounds each hop's PTR and ASN lookup so a slow or broken DNS
 // server only costs that hop its annotation, never the whole trace.
-var LookupTimeout = 2 * time.Second
+var lookupTimeout = 2 * time.Second
 
-// LookupHost returns addr's first PTR name without the trailing dot, or ""
-// when there is none or the lookup fails.
-func LookupHost(ctx context.Context, resolver *net.Resolver, addr netip.Addr) string {
-	host, _ := lookupHost(ctx, resolver, addr)
-	return host
-}
-
-// LookupASN returns the origin ASN for addr ("AS15169") from Team Cymru's
-// "ASN | prefix | CC | registry | allocated" TXT record, or "".
-func LookupASN(ctx context.Context, resolver *net.Resolver, addr netip.Addr) string {
-	asn, _ := lookupASN(ctx, resolver, addr)
-	return asn
-}
-
-// LookupASName returns the AS description from Team Cymru's
-// "ASN | CC | registry | allocated | name" TXT record for asn ("AS15169"),
-// or "".
-func LookupASName(ctx context.Context, resolver *net.Resolver, asn string) string {
-	name, _ := lookupASName(ctx, resolver, asn)
-	return name
-}
-
-// The unexported lookups return an error only for a failed lookup; a missing
-// record is an empty answer.
+// The lookups return an error only for a failed lookup; a missing record is
+// an empty answer.
 
 func lookupHost(ctx context.Context, resolver *net.Resolver, addr netip.Addr) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, LookupTimeout)
+	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
 	defer cancel()
 	names, err := resolver.LookupAddr(ctx, addr.String())
 	if err != nil || len(names) == 0 {
@@ -308,10 +286,10 @@ func lookupASName(ctx context.Context, resolver *net.Resolver, asn string) (stri
 // "|"-separated fields. TXT data is arbitrary bytes, so invalid UTF-8 is
 // replaced to keep the fields usable as Prometheus label values.
 func lookupCymruTXT(ctx context.Context, resolver *net.Resolver, query string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(ctx, LookupTimeout)
+	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
 	defer cancel()
 	// Query the rooted name so resolv.conf search domains (Kubernetes uses
-	// ndots:5) are not tried first; each miss would eat into LookupTimeout.
+	// ndots:5) are not tried first; each miss would eat into lookupTimeout.
 	txts, err := resolver.LookupTXT(ctx, query+".")
 	if err != nil {
 		return nil, failure(err)
