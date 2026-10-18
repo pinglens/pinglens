@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/pinglens/pinglens/internal/protocol"
+	"github.com/pinglens/pinglens/internal/traceroute"
 	"log/slog"
 	"net"
 	"net/http"
@@ -27,9 +28,10 @@ type Config struct {
 	PingInterval           time.Duration
 	PingTimeout            time.Duration
 	JobDuration            time.Duration
-	MTRCycles              int
-	MTRMaxTTL              int
-	MTRInterval            time.Duration
+	TraceInterval          time.Duration
+	TraceTimeout           time.Duration
+	TraceMaxTTL            int
+	TraceReportInterval    time.Duration
 	AgentPollTimeout       time.Duration
 	AgentOnlineTimeout     time.Duration
 	JobRetention           time.Duration
@@ -134,14 +136,17 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.PingTimeout <= 0 {
 		cfg.PingTimeout = 3 * time.Second
 	}
-	if cfg.MTRCycles <= 0 {
-		cfg.MTRCycles = 10
+	if cfg.TraceInterval <= 0 {
+		cfg.TraceInterval = time.Second
 	}
-	if cfg.MTRMaxTTL <= 0 {
-		cfg.MTRMaxTTL = 30
+	if cfg.TraceTimeout <= 0 || cfg.TraceTimeout >= cfg.TraceInterval {
+		cfg.TraceTimeout = cfg.TraceInterval * 9 / 10
 	}
-	if cfg.MTRInterval <= 0 {
-		cfg.MTRInterval = 5 * time.Second
+	if cfg.TraceMaxTTL <= 0 || cfg.TraceMaxTTL > traceroute.MaxTTLLimit {
+		cfg.TraceMaxTTL = 30
+	}
+	if cfg.TraceReportInterval <= 0 {
+		cfg.TraceReportInterval = 5 * time.Second
 	}
 	if cfg.AgentPollTimeout <= 0 {
 		cfg.AgentPollTimeout = 30 * time.Second
@@ -296,7 +301,12 @@ func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) probeJob(id, normalizedTarget string) protocol.ProbeJob {
-	return protocol.ProbeJob{JobID: id, Target: normalizedTarget, Count: s.cfg.PingCount, IntervalMillis: int(s.cfg.PingInterval / time.Millisecond), TimeoutMillis: int(s.cfg.PingTimeout / time.Millisecond), DurationMillis: int(s.cfg.JobDuration / time.Millisecond), MTR: protocol.MTRConfig{Cycles: s.cfg.MTRCycles, MaxTTL: s.cfg.MTRMaxTTL, IntervalMillis: int(s.cfg.MTRInterval / time.Millisecond)}}
+	return protocol.ProbeJob{JobID: id, Target: normalizedTarget, Count: s.cfg.PingCount, IntervalMillis: int(s.cfg.PingInterval / time.Millisecond), TimeoutMillis: int(s.cfg.PingTimeout / time.Millisecond), DurationMillis: int(s.cfg.JobDuration / time.Millisecond), Trace: protocol.TraceConfig{
+		IntervalMillis: int(s.cfg.TraceInterval / time.Millisecond),
+		TimeoutMillis:  int(s.cfg.TraceTimeout / time.Millisecond),
+		MaxTTL:         s.cfg.TraceMaxTTL,
+		ReportMillis:   int(s.cfg.TraceReportInterval / time.Millisecond),
+	}}
 }
 
 func (s *Server) jobEvents(w http.ResponseWriter, r *http.Request) {

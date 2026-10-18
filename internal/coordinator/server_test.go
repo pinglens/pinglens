@@ -50,7 +50,8 @@ func TestCreateJobQueuesOnlineAgent(t *testing.T) {
 	if err := json.NewDecoder(pollResp.Body).Decode(&poll); err != nil {
 		t.Fatal(err)
 	}
-	if poll.Job == nil || poll.Job.Target != "example.com" || poll.Job.Count != 3 || poll.Job.DurationMillis != 3000 || poll.Job.MTR.Cycles != 10 {
+	if poll.Job == nil || poll.Job.Target != "example.com" || poll.Job.Count != 3 || poll.Job.DurationMillis != 3000 ||
+		poll.Job.Trace != (protocol.TraceConfig{IntervalMillis: 1000, TimeoutMillis: 900, MaxTTL: 30, ReportMillis: 5000}) {
 		t.Fatalf("unexpected job: %+v", poll.Job)
 	}
 	var create protocol.JobCreateResponse

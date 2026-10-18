@@ -16,19 +16,23 @@ type AgentPollResponse struct {
 }
 
 type ProbeJob struct {
-	JobID          string    `json:"job_id"`
-	Target         string    `json:"target"`
-	Count          int       `json:"count"`
-	IntervalMillis int       `json:"interval_millis"`
-	TimeoutMillis  int       `json:"timeout_millis"`
-	DurationMillis int       `json:"duration_millis"`
-	MTR            MTRConfig `json:"mtr"`
+	JobID          string      `json:"job_id"`
+	Target         string      `json:"target"`
+	Count          int         `json:"count"`
+	IntervalMillis int         `json:"interval_millis"`
+	TimeoutMillis  int         `json:"timeout_millis"`
+	DurationMillis int         `json:"duration_millis"`
+	Trace          TraceConfig `json:"trace"`
 }
 
-type MTRConfig struct {
-	Cycles         int `json:"cycles"`
-	MaxTTL         int `json:"max_ttl"`
+// TraceConfig sets the agent's continuous trace: one probe per hop every
+// IntervalMillis, each waiting up to TimeoutMillis, up to MaxTTL hops, with
+// the rolling hop table reported every ReportMillis.
+type TraceConfig struct {
 	IntervalMillis int `json:"interval_millis"`
+	TimeoutMillis  int `json:"timeout_millis"`
+	MaxTTL         int `json:"max_ttl"`
+	ReportMillis   int `json:"report_millis"`
 }
 
 type JobCreateRequest struct {

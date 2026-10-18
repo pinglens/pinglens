@@ -1,6 +1,7 @@
 package ping
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -216,7 +217,10 @@ func (p *pinger) probe(seq int, timeout time.Duration) Result {
 			continue
 		}
 		echo, ok := parsed.Body.(*icmp.Echo)
-		if !ok || echo.ID != p.id || echo.Seq != seq {
+		// The agent's trace engine shares the network namespace's ICMP
+		// traffic; checking the payload keeps a trace echo reply whose ID and
+		// sequence happen to match from counting as this ping.
+		if !ok || echo.ID != p.id || echo.Seq != seq || !bytes.Equal(echo.Data, payload) {
 			continue
 		}
 		return Result{Seq: seq, Success: true, RTT: time.Since(started)}

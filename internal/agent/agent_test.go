@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/pinglens/pinglens/internal/protocol"
 )
@@ -38,12 +37,5 @@ func TestPostEventDetectsCanceledJob(t *testing.T) {
 	err := postEvent(context.Background(), srv.Client(), Config{CoordinatorURL: srv.URL, Token: "token"}, protocol.AgentEvent{JobID: "canceled", ClusterID: "dfw1", Type: "ping"})
 	if !errors.Is(err, errJobCanceled) {
 		t.Fatalf("expected errJobCanceled, got %v", err)
-	}
-}
-
-func TestMTRTimeoutIncludesCycleRuntimeAndGrace(t *testing.T) {
-	timeout := mtrTimeout(protocol.ProbeJob{MTR: protocol.MTRConfig{Cycles: 10}})
-	if timeout != 55*time.Second {
-		t.Fatalf("expected 55s timeout, got %s", timeout)
 	}
 }

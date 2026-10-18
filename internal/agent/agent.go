@@ -14,10 +14,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pinglens/pinglens/internal/mtr"
 	"github.com/pinglens/pinglens/internal/ping"
 	"github.com/pinglens/pinglens/internal/protocol"
 	"github.com/pinglens/pinglens/internal/target"
+	"github.com/pinglens/pinglens/internal/traceroute"
 )
 
 type Config struct {
@@ -26,10 +26,12 @@ type Config struct {
 	InstanceID     string
 	DisplayName    string
 	Token          string
-	MTRBinary      string
 	UserAgent      string
 	PollBackoff    time.Duration
 }
+
+// hopNameRetention is how long hop names stay cached without being used.
+const hopNameRetention = time.Hour
 
 var errJobNotFound = errors.New("coordinator no longer has this job")
 var errJobCanceled = errors.New("coordinator canceled this job")
@@ -46,6 +48,14 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) error {
 		}
 	}
 	logger = logger.With("agent", cfg.ClusterID, "agent_instance", cfg.InstanceID)
+	// One prober and one hop name cache serve every job this agent runs.
+	prober, err := traceroute.NewProber(logger)
+	if err != nil {
+		return err
+	}
+	defer prober.Close()
+	names := traceroute.NewHopNames(nil, hopNameRetention)
+	go pruneHopNames(ctx, names)
 	client := &http.Client{Timeout: 40 * time.Second}
 	for {
 		if err := ctx.Err(); err != nil {
@@ -65,7 +75,7 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) error {
 		}
 		go func(job protocol.ProbeJob) {
 			logger.Info("starting probe job", "job", job.JobID, "target", job.Target)
-			executeJob(ctx, client, cfg, job, logger)
+			executeJob(ctx, client, cfg, job, logger, prober, names)
 		}(*job)
 	}
 }
@@ -87,7 +97,7 @@ func poll(ctx context.Context, client *http.Client, cfg Config) (*protocol.Probe
 	return response.Job, nil
 }
 
-func executeJob(ctx context.Context, client *http.Client, cfg Config, job protocol.ProbeJob, logger *slog.Logger) {
+func executeJob(ctx context.Context, client *http.Client, cfg Config, job protocol.ProbeJob, logger *slog.Logger, tr tracer, names hopNamer) {
 	jobCtx, cancel := context.WithTimeout(ctx, jobDuration(job))
 	defer cancel()
 	var orphaned atomic.Bool
@@ -131,7 +141,7 @@ func executeJob(ctx context.Context, client *http.Client, cfg Config, job protoc
 	traceDone := make(chan struct{})
 	go func() {
 		defer close(traceDone)
-		traceLoop(jobCtx, cfg, job, resolvedString, event)
+		traceLoop(jobCtx, tr, names, job, resolved, event)
 	}()
 
 	results := make([]ping.Result, 0, job.Count)
@@ -229,26 +239,6 @@ func chooseAddress(addrs []netip.Addr) netip.Addr {
 	return addrs[0]
 }
 
-func traceLoop(ctx context.Context, cfg Config, job protocol.ProbeJob, resolved string, event func(protocol.AgentEvent) bool) {
-	interval := time.Duration(job.MTR.IntervalMillis) * time.Millisecond
-	if interval <= 0 {
-		interval = 5 * time.Second
-	}
-	for {
-		report, err := mtr.Run(ctx, cfg.MTRBinary, resolved, mtr.Config{Cycles: job.MTR.Cycles, MaxTTL: job.MTR.MaxTTL, Timeout: mtrTimeout(job), OutputLimit: 256 * 1024})
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			report.Error = err.Error()
-		}
-		if !event(protocol.AgentEvent{Type: "trace", Target: job.Target, Resolved: resolved, Trace: &report}) || ctx.Err() != nil {
-			return
-		}
-		sleep(ctx, interval)
-	}
-}
-
 func jobDuration(job protocol.ProbeJob) time.Duration {
 	duration := time.Duration(job.DurationMillis) * time.Millisecond
 	if duration <= 0 {
@@ -269,12 +259,18 @@ func summaryEvent(summary ping.Summary) protocol.PingSummary {
 	}
 }
 
-func mtrTimeout(job protocol.ProbeJob) time.Duration {
-	cycles := job.MTR.Cycles
-	if cycles <= 0 {
-		cycles = 10
+// pruneHopNames drops hop names unused for hopNameRetention until ctx ends.
+func pruneHopNames(ctx context.Context, names *traceroute.HopNames) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			names.Prune()
+		}
 	}
-	return time.Duration(cycles)*time.Second + 45*time.Second
 }
 
 func millis(duration time.Duration) float64 {
