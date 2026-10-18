@@ -126,9 +126,14 @@ coordinator:
   pingInterval: 1s
   pingTimeout: 3s
   jobDuration: 10m
-  mtrCycles: 10
-  mtrMaxTTL: 30
-  mtrInterval: 5s
+  # Agents trace each job's target continuously: one probe per hop every
+  # traceInterval, each waiting up to traceTimeout (below traceInterval), up
+  # to traceMaxTTL hops (at most 31). The rolling hop table is reported every
+  # traceReportInterval and kept with the job's events.
+  traceInterval: 1s
+  traceTimeout: 900ms
+  traceMaxTTL: 30
+  traceReportInterval: 5s
   globalCreateRateLimit: 120
   targetCreateRateLimit: 30
   clientCreateRateLimit: 20
@@ -151,7 +156,6 @@ agent:
   id: ""
   displayName: ""
   coordinatorURL: ""
-  mtrBinary: mtr
   pollBackoff: 2s
   tokenSecret:
     name: ""

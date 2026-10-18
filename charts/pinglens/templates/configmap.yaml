@@ -30,9 +30,10 @@ data:
   PINGLENS_PING_INTERVAL: {{ .Values.coordinator.pingInterval | quote }}
   PINGLENS_PING_TIMEOUT: {{ .Values.coordinator.pingTimeout | quote }}
   PINGLENS_JOB_DURATION: {{ .Values.coordinator.jobDuration | quote }}
-  PINGLENS_MTR_CYCLES: {{ .Values.coordinator.mtrCycles | quote }}
-  PINGLENS_MTR_MAX_TTL: {{ .Values.coordinator.mtrMaxTTL | quote }}
-  PINGLENS_MTR_INTERVAL: {{ .Values.coordinator.mtrInterval | quote }}
+  PINGLENS_TRACE_INTERVAL: {{ .Values.coordinator.traceInterval | quote }}
+  PINGLENS_TRACE_TIMEOUT: {{ .Values.coordinator.traceTimeout | quote }}
+  PINGLENS_TRACE_MAX_TTL: {{ .Values.coordinator.traceMaxTTL | quote }}
+  PINGLENS_TRACE_REPORT_INTERVAL: {{ .Values.coordinator.traceReportInterval | quote }}
   PINGLENS_GLOBAL_CREATE_RATE_LIMIT: {{ .Values.coordinator.globalCreateRateLimit | quote }}
   PINGLENS_TARGET_CREATE_RATE_LIMIT: {{ .Values.coordinator.targetCreateRateLimit | quote }}
   PINGLENS_CLIENT_CREATE_RATE_LIMIT: {{ .Values.coordinator.clientCreateRateLimit | quote }}
@@ -65,6 +66,5 @@ data:
   PINGLENS_AGENT_ID: {{ .Values.agent.id | quote }}
   PINGLENS_DISPLAY_NAME: {{ .Values.agent.displayName | quote }}
   PINGLENS_COORDINATOR_URL: {{ .Values.agent.coordinatorURL | quote }}
-  PINGLENS_MTR_BINARY: {{ .Values.agent.mtrBinary | quote }}
   PINGLENS_POLL_BACKOFF: {{ .Values.agent.pollBackoff | quote }}
 {{- end }}
