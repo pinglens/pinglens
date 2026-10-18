@@ -37,6 +37,31 @@ web-test:
       "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" | base64 | tr -d '\n')\"}}}"
       > /kaniko/.docker/config.json
 
+# Each image builds only when its own inputs change, so its :latest digest
+# moves only for real changes to that image.
+.pinglens_changes: &pinglens_changes
+  - cmd/pinglens/**/*
+  - internal/agent/**/*
+  - internal/coordinator/**/*
+  - internal/mtr/**/*
+  - internal/ping/**/*
+  - internal/protocol/**/*
+  - internal/target/**/*
+  - internal/traceroute/**/*
+  - web/**/*
+  - go.mod
+  - go.sum
+  - Dockerfile
+
+.exporter_changes: &exporter_changes
+  - cmd/pinglens_exporter/**/*
+  - internal/exporter/**/*
+  - internal/traceroute/**/*
+  - internal/target/**/*
+  - go.mod
+  - go.sum
+  - Dockerfile.exporter
+
 build_container:
   extends: .build_container_base
   script:
@@ -47,8 +72,10 @@ build_container:
       --destination "${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}"
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *pinglens_changes
       when: on_success
     - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != "main"'
+      changes: *pinglens_changes
       when: on_success
 
 build_container_main:
@@ -62,4 +89,35 @@ build_container_main:
       --destination "${CI_REGISTRY_IMAGE}:latest"
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
+      changes: *pinglens_changes
+      when: on_success
+
+build_exporter_container:
+  extends: .build_container_base
+  script:
+    - >
+      /kaniko/executor
+      --context "${CI_PROJECT_DIR}"
+      --dockerfile "${CI_PROJECT_DIR}/Dockerfile.exporter"
+      --destination "${CI_REGISTRY_IMAGE}/pinglens-exporter:${CI_COMMIT_SHORT_SHA}"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *exporter_changes
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != "main"'
+      changes: *exporter_changes
+      when: on_success
+
+build_exporter_container_main:
+  extends: .build_container_base
+  script:
+    - >
+      /kaniko/executor
+      --context "${CI_PROJECT_DIR}"
+      --dockerfile "${CI_PROJECT_DIR}/Dockerfile.exporter"
+      --destination "${CI_REGISTRY_IMAGE}/pinglens-exporter:${CI_COMMIT_SHORT_SHA}"
+      --destination "${CI_REGISTRY_IMAGE}/pinglens-exporter:latest"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes: *exporter_changes
       when: on_success
