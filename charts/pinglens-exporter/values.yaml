@@ -1,0 +1,110 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/pinglens/pinglens-exporter
+  tag: latest
+  pullPolicy: Always
+
+imagePullSecrets: []
+  # - name: my-image-pull-secret
+nameOverride: ""
+fullnameOverride: ""
+
+# Annotations on the Deployment itself, for tools that read their
+# settings from Deployment metadata.
+annotations: {}
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+podLabels: {}
+
+# Rollout strategy, could be "Recreate" or "RollingUpdate"
+strategy:
+  type: RollingUpdate
+
+podSecurityContext: {}
+
+# Raw ICMP sockets need NET_RAW, and a non-root user only keeps file
+# capabilities, which the image does not set, so the exporter runs as root
+# with every other capability dropped.
+securityContext:
+  runAsUser: 0
+  runAsNonRoot: false
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+    add:
+      - NET_RAW
+
+service:
+  type: ClusterIP
+  port: 9430
+
+# Create a ServiceMonitor resource to be consumed by Prometheus Operator
+serviceMonitor:
+  enabled: false
+  # Extra labels, e.g. the release label the Prometheus selects on.
+  labels: {}
+  interval: 30s
+  relabelings:
+    - action: labeldrop
+      regex: pod
+      sourceLabels: []
+    - action: labeldrop
+      regex: namespace
+      sourceLabels: []
+    - action: labeldrop
+      regex: instance
+      sourceLabels: []
+    - action: labeldrop
+      regex: job
+      sourceLabels: []
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: "1"
+    memory: 128Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Global trace settings. The exporter only applies these at startup, so
+# changing them restarts the pod.
+config:
+  # Time between rounds; each round sends one probe per hop.
+  interval: 2.5s
+  # How long a probe waits for its reply; must be shorter than interval.
+  timeout: 2s
+  # Farthest hop probed while the destination is unreached (1-31).
+  max_ttl: 30
+
+# Trace groups. Each group's targets are host strings or single-key maps of
+# host to per-target labels; group labels apply to every target in the group.
+# Every target gets ping_group (the group key) and endpoint_fullname labels.
+# Target changes only rewrite the ConfigMap: the exporter reloads it in
+# place, so adding or removing targets does not restart the pod.
+targets: {}
+  # default:
+  #   labels:
+  #     group_title: Internet Targets
+  #   targets:
+  #     - 1.1.1.1
+  #     - 8.8.8.8:
+  #         endpoint_name: Google DNS

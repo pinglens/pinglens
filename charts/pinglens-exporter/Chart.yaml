@@ -1,0 +1,6 @@
+apiVersion: v2
+name: pinglens-exporter
+description: Continuous per-hop ICMP trace exporter (PingLens)
+type: application
+version: 0.1.0
+appVersion: "latest"
