@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 )
 
 // MaxTTLLimit is the largest TTL a probe can carry: the TTL occupies the
@@ -101,12 +102,13 @@ type conn interface {
 	Close() error
 }
 
-// Prober sends TTL-limited ICMP echo requests for any number of concurrent
-// traces over one raw socket and routes the replies back to their trace by
-// echo ID.
+// Prober sends hop-limited ICMP echo requests for any number of concurrent
+// traces over one raw socket per address family and routes the replies back
+// to their trace by echo ID.
 type Prober struct {
 	logger  *slog.Logger
-	conn    conn
+	conn4   conn
+	conn6   conn
 	now     func() time.Time
 	spacing time.Duration
 	resolve func(ctx context.Context, host string) ([]netip.Addr, error)
@@ -116,46 +118,82 @@ type Prober struct {
 	idBase    uint16
 	nextIndex uint16
 
-	done chan struct{}
+	receivers sync.WaitGroup
 }
 
-// NewProber opens the raw ICMP socket and starts the receive loop. Opening
-// the socket needs CAP_NET_RAW.
+// NewProber opens the raw ICMP sockets and starts their receive loops.
+// Opening them needs CAP_NET_RAW. The IPv4 socket is required; without an
+// IPv6 socket (no IPv6 in the network namespace) only IPv4 targets trace.
 func NewProber(logger *slog.Logger) (*Prober, error) {
-	c, err := listenRaw()
+	c4, err := listenRaw4()
 	if err != nil {
 		return nil, fmt.Errorf("open raw ICMP socket (needs NET_RAW): %w", err)
 	}
-	p := newProber(logger, c)
-	go p.receive()
+	p := newProber(logger, c4, nil)
+	// Assign only an open socket: a nil *rawConn in the interface would not
+	// compare equal to nil.
+	if c6, err := listenRaw6(); err != nil {
+		logger.Info("IPv6 traces unavailable", "error", err)
+	} else {
+		p.conn6 = c6
+	}
+	p.start()
 	return p, nil
 }
 
-func newProber(logger *slog.Logger, c conn) *Prober {
+// newProber builds a prober over the given connections; c6 may be nil.
+func newProber(logger *slog.Logger, c4, c6 conn) *Prober {
 	return &Prober{
 		logger:  logger,
-		conn:    c,
+		conn4:   c4,
+		conn6:   c6,
 		now:     time.Now,
 		spacing: ttlSpacing,
 		resolve: resolveIPv4,
 		runners: map[uint16]*runner{},
 		idBase:  uint16(rand.N(1 << 16)),
-		done:    make(chan struct{}),
 	}
 }
 
-// Close closes the socket and waits for the receive loop to stop. Traces
-// still running stop receiving replies.
-func (p *Prober) Close() error {
-	err := p.conn.Close()
-	<-p.done
-	return err
+// start runs one receive loop per open socket.
+func (p *Prober) start() {
+	for _, c := range []conn{p.conn4, p.conn6} {
+		if c != nil {
+			p.receivers.Go(func() { p.receive(c) })
+		}
+	}
 }
 
-// Trace probes host continuously until ctx is cancelled. host is an IPv4
-// literal or a hostname, re-resolved every five minutes (every 30 seconds
-// while resolution fails). A hostname with several addresses keeps its
-// current one while DNS still returns it, and otherwise takes the first.
+// Close closes the sockets and waits for the receive loops to stop. Traces
+// still running stop receiving replies.
+func (p *Prober) Close() error {
+	var errs []error
+	for _, c := range []conn{p.conn4, p.conn6} {
+		if c != nil {
+			errs = append(errs, c.Close())
+		}
+	}
+	p.receivers.Wait()
+	return errors.Join(errs...)
+}
+
+// Supports reports whether addr's address family can be traced.
+func (p *Prober) Supports(addr netip.Addr) bool {
+	return p.connFor(addr) != nil
+}
+
+func (p *Prober) connFor(addr netip.Addr) conn {
+	if addr.Unmap().Is4() {
+		return p.conn4
+	}
+	return p.conn6
+}
+
+// Trace probes host continuously until ctx is cancelled. host is an IP
+// literal or a hostname, resolved to IPv4 and re-resolved every five minutes
+// (every 30 seconds while resolution fails). A hostname with several
+// addresses keeps its current one while DNS still returns it, and otherwise
+// takes the first.
 func (p *Prober) Trace(ctx context.Context, host string, opts Options, cb Callbacks) {
 	if opts.Interval <= 0 || opts.Timeout <= 0 {
 		p.logger.Error("trace needs a positive interval and timeout", "target", host)
@@ -163,8 +201,8 @@ func (p *Prober) Trace(ctx context.Context, host string, opts Options, cb Callba
 	}
 	literal, err := netip.ParseAddr(host)
 	isLiteral := err == nil
-	if isLiteral && !literal.Unmap().Is4() {
-		p.logger.Error("trace targets must be IPv4", "target", host)
+	if isLiteral && !p.Supports(literal) {
+		p.logger.Error("trace target's address family is unavailable", "target", host)
 		return
 	}
 	r := p.newRunner(host, opts, cb)
@@ -230,11 +268,10 @@ func (p *Prober) unregister(id uint16) {
 	p.mu.Unlock()
 }
 
-func (p *Prober) receive() {
-	defer close(p.done)
+func (p *Prober) receive(c conn) {
 	buf := make([]byte, 1500)
 	for {
-		n, from, err := p.conn.Recv(buf)
+		n, from, err := c.Recv(buf)
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				return
@@ -251,7 +288,8 @@ func (p *Prober) receive() {
 // A raw socket sees every ICMP packet in the network namespace, including
 // other pingers', so anything that does not match a pending probe is dropped.
 func (p *Prober) dispatch(b []byte, from netip.Addr, now time.Time) {
-	id, seq, origDst, quoted, ok := parseReply(b)
+	from = from.Unmap()
+	id, seq, origDst, quoted, ok := parseReply(b, from.Is6())
 	if !ok {
 		return
 	}
@@ -259,23 +297,27 @@ func (p *Prober) dispatch(b []byte, from netip.Addr, now time.Time) {
 	r := p.runners[id]
 	p.mu.RUnlock()
 	if r != nil {
-		r.reply(seq, from.Unmap(), origDst, quoted, now)
+		r.reply(seq, from, origDst, quoted, now)
 	}
 }
 
-// parseReply extracts the echo ID and sequence of the probe an ICMP message
-// answers: an echo reply carrying our payload directly, or a time-exceeded
-// or unreachable error quoting the probe. quoted reports the latter, with
-// the probe's original destination in origDst.
-func parseReply(b []byte) (id, seq uint16, origDst netip.Addr, quoted, ok bool) {
-	msg, err := icmp.ParseMessage(1, b)
+// parseReply extracts the echo ID and sequence of the probe an ICMP or
+// ICMPv6 message answers: an echo reply carrying our payload directly, or a
+// time-exceeded or unreachable error quoting the probe. quoted reports the
+// latter, with the probe's original destination in origDst.
+func parseReply(b []byte, v6 bool) (id, seq uint16, origDst netip.Addr, quoted, ok bool) {
+	proto, echoReply := 1, icmp.Type(ipv4.ICMPTypeEchoReply)
+	if v6 {
+		proto, echoReply = 58, ipv6.ICMPTypeEchoReply
+	}
+	msg, err := icmp.ParseMessage(proto, b)
 	if err != nil {
 		return 0, 0, netip.Addr{}, false, false
 	}
 	var data []byte
 	switch body := msg.Body.(type) {
 	case *icmp.Echo:
-		if msg.Type != ipv4.ICMPTypeEchoReply || !bytes.Equal(body.Data, payload) {
+		if msg.Type != echoReply || !bytes.Equal(body.Data, payload) {
 			return 0, 0, netip.Addr{}, false, false
 		}
 		return uint16(body.ID), uint16(body.Seq), netip.Addr{}, false, true
@@ -286,17 +328,40 @@ func parseReply(b []byte) (id, seq uint16, origDst netip.Addr, quoted, ok bool) 
 	default:
 		return 0, 0, netip.Addr{}, false, false
 	}
+	if v6 {
+		id, seq, origDst, ok = parseQuote6(data)
+	} else {
+		id, seq, origDst, ok = parseQuote4(data)
+	}
+	return id, seq, origDst, ok, ok
+}
+
+// parseQuote4 reads the probe quoted in an ICMP error: the original IPv4
+// header, then at least the first 8 bytes of our echo request.
+func parseQuote4(data []byte) (id, seq uint16, origDst netip.Addr, ok bool) {
 	if len(data) < ipv4.HeaderLen {
-		return 0, 0, netip.Addr{}, false, false
+		return 0, 0, netip.Addr{}, false
 	}
 	ihl := int(data[0]&0x0f) * 4
 	if ihl < ipv4.HeaderLen || len(data) < ihl+8 || data[ihl] != byte(ipv4.ICMPTypeEcho) {
-		return 0, 0, netip.Addr{}, false, false
+		return 0, 0, netip.Addr{}, false
 	}
 	id = uint16(data[ihl+4])<<8 | uint16(data[ihl+5])
 	seq = uint16(data[ihl+6])<<8 | uint16(data[ihl+7])
-	origDst = netip.AddrFrom4([4]byte(data[16:20]))
-	return id, seq, origDst, true, true
+	return id, seq, netip.AddrFrom4([4]byte(data[16:20])), true
+}
+
+// parseQuote6 reads the probe quoted in an ICMPv6 error: the original IPv6
+// header, whose next header is ICMPv6 since probes carry no extension
+// headers, then the first 8 bytes of our echo request.
+func parseQuote6(data []byte) (id, seq uint16, origDst netip.Addr, ok bool) {
+	const hdr = ipv6.HeaderLen
+	if len(data) < hdr+8 || data[6] != 58 || data[hdr] != byte(ipv6.ICMPTypeEchoRequest) {
+		return 0, 0, netip.Addr{}, false
+	}
+	id = uint16(data[hdr+4])<<8 | uint16(data[hdr+5])
+	seq = uint16(data[hdr+6])<<8 | uint16(data[hdr+7])
+	return id, seq, netip.AddrFrom16([16]byte(data[24:40])), true
 }
 
 func encodeSeq(round, ttl int) uint16 {
@@ -446,7 +511,11 @@ func (r *runner) runRound(ctx context.Context) {
 			}
 		}
 		seq := encodeSeq(round, ttl)
-		msg := icmp.Message{Type: ipv4.ICMPTypeEcho, Body: &icmp.Echo{ID: int(r.id), Seq: int(seq), Data: payload}}
+		echo := icmp.Type(ipv4.ICMPTypeEcho)
+		if ip.Is6() {
+			echo = ipv6.ICMPTypeEchoRequest
+		}
+		msg := icmp.Message{Type: echo, Body: &icmp.Echo{ID: int(r.id), Seq: int(seq), Data: payload}}
 		b, err := msg.Marshal(nil)
 		if err != nil {
 			r.prober.logger.Error("marshal ICMP echo", "error", err)
@@ -460,7 +529,7 @@ func (r *runner) runRound(ctx context.Context) {
 		}
 		r.pending[seq] = pendingProbe{sent: r.prober.now(), round: round, discovery: !reached}
 		r.mu.Unlock()
-		if err := r.prober.conn.Send(b, ttl, ip); err != nil {
+		if err := r.prober.connFor(ip).Send(b, ttl, ip); err != nil {
 			r.prober.logger.Debug("send trace probe", "target", r.host, "ttl", ttl, "error", err)
 		}
 	}
@@ -565,13 +634,14 @@ func resolveIPv4(ctx context.Context, host string) ([]netip.Addr, error) {
 	return addrs, err
 }
 
-// rawConn is a raw IPv4 ICMP socket.
+// rawConn is a raw ICMP or ICMPv6 socket.
 type rawConn struct {
 	mu sync.Mutex
 	pc *icmp.PacketConn
+	v6 bool
 }
 
-func listenRaw() (*rawConn, error) {
+func listenRaw4() (*rawConn, error) {
 	pc, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
 	if err != nil {
 		return nil, err
@@ -579,15 +649,30 @@ func listenRaw() (*rawConn, error) {
 	return &rawConn{pc: pc}, nil
 }
 
-// Send writes one probe with the given TTL. x/net has no per-message TTL for
-// IPv4 sends, so the socket TTL is set and used under one lock.
+func listenRaw6() (*rawConn, error) {
+	pc, err := icmp.ListenPacket("ip6:ipv6-icmp", "::")
+	if err != nil {
+		return nil, err
+	}
+	return &rawConn{pc: pc, v6: true}, nil
+}
+
+// Send writes one probe with the given TTL (hop limit). x/net has no
+// per-message TTL for sends, so the socket's is set and used under one lock.
+// The kernel computes the ICMPv6 checksum.
 func (c *rawConn) Send(b []byte, ttl int, dst netip.Addr) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if err := c.pc.IPv4PacketConn().SetTTL(ttl); err != nil {
+	var err error
+	if c.v6 {
+		err = c.pc.IPv6PacketConn().SetHopLimit(ttl)
+	} else {
+		err = c.pc.IPv4PacketConn().SetTTL(ttl)
+	}
+	if err != nil {
 		return err
 	}
-	_, err := c.pc.WriteTo(b, &net.IPAddr{IP: dst.AsSlice()})
+	_, err = c.pc.WriteTo(b, &net.IPAddr{IP: dst.AsSlice()})
 	return err
 }
 

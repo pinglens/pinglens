@@ -14,11 +14,14 @@ import (
 
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 )
 
 var (
-	testSource = netip.MustParseAddr("198.51.100.7")
-	testDest   = netip.MustParseAddr("192.0.2.9")
+	testSource  = netip.MustParseAddr("198.51.100.7")
+	testDest    = netip.MustParseAddr("192.0.2.9")
+	testSource6 = netip.MustParseAddr("2001:db8:ffff::7")
+	testDest6   = netip.MustParseAddr("2001:db8::9")
 )
 
 func TestSeqEncoding(t *testing.T) {
@@ -39,7 +42,7 @@ func TestSeqEncoding(t *testing.T) {
 func TestParseReplyQuotedEcho(t *testing.T) {
 	probe := echoRequest(t, 0xbeef, encodeSeq(3, 7))
 	reply := timeExceeded(t, probe, testDest)
-	id, seq, origDst, quoted, ok := parseReply(reply)
+	id, seq, origDst, quoted, ok := parseReply(reply, false)
 	if !ok || !quoted || id != 0xbeef || seq != encodeSeq(3, 7) || origDst != testDest {
 		t.Fatalf("parseReply = id %#x seq %#x dst %s quoted %v ok %v", id, seq, origDst, quoted, ok)
 	}
@@ -47,18 +50,83 @@ func TestParseReplyQuotedEcho(t *testing.T) {
 	// RFC 792 only promises 8 bytes of the quoted datagram after its header;
 	// anything shorter cannot name the probe.
 	short := timeExceededRaw(t, append(ipHeader(testDest), probe[:4]...))
-	if _, _, _, _, ok := parseReply(short); ok {
+	if _, _, _, _, ok := parseReply(short, false); ok {
 		t.Fatal("quote shorter than 8 bytes was accepted")
 	}
-	if _, _, _, _, ok := parseReply(probe); ok {
+	if _, _, _, _, ok := parseReply(probe, false); ok {
 		t.Fatal("echo request was accepted as a reply")
 	}
-	if _, _, _, _, ok := parseReply(echoReply(t, 0xbeef, 9)); !ok {
+	if _, _, _, _, ok := parseReply(echoReply(t, 0xbeef, 9), false); !ok {
 		t.Fatal("echo reply was rejected")
 	}
 	other := mustMarshal(&icmp.Message{Type: ipv4.ICMPTypeEchoReply, Body: &icmp.Echo{ID: 0xbeef, Seq: 9, Data: []byte("pinglens")}})
-	if _, _, _, _, ok := parseReply(other); ok {
+	if _, _, _, _, ok := parseReply(other, false); ok {
 		t.Fatal("echo reply with another pinger's payload was accepted")
+	}
+}
+
+func TestParseReplyQuotedEcho6(t *testing.T) {
+	probe := mustMarshal(&icmp.Message{Type: ipv6.ICMPTypeEchoRequest, Body: &icmp.Echo{ID: 0xbeef, Seq: int(encodeSeq(3, 7)), Data: payload}})
+	quote := append(ip6Header(testDest6), probe...)
+	reply := mustMarshal(&icmp.Message{Type: ipv6.ICMPTypeTimeExceeded, Body: &icmp.TimeExceeded{Data: quote}})
+	id, seq, origDst, quoted, ok := parseReply(reply, true)
+	if !ok || !quoted || id != 0xbeef || seq != encodeSeq(3, 7) || origDst != testDest6 {
+		t.Fatalf("parseReply = id %#x seq %#x dst %s quoted %v ok %v", id, seq, origDst, quoted, ok)
+	}
+	short := mustMarshal(&icmp.Message{Type: ipv6.ICMPTypeTimeExceeded, Body: &icmp.TimeExceeded{Data: append(ip6Header(testDest6), probe[:4]...)}})
+	if _, _, _, _, ok := parseReply(short, true); ok {
+		t.Fatal("quote shorter than 8 bytes was accepted")
+	}
+	echo := mustMarshal(&icmp.Message{Type: ipv6.ICMPTypeEchoReply, Body: &icmp.Echo{ID: 0xbeef, Seq: 9, Data: payload}})
+	if _, _, _, _, ok := parseReply(echo, true); !ok {
+		t.Fatal("ICMPv6 echo reply was rejected")
+	}
+	// An ICMPv4 message read as ICMPv6 must not match: type numbers differ.
+	if _, _, _, _, ok := parseReply(echoReply(t, 0xbeef, 9), true); ok {
+		t.Fatal("ICMPv4 echo reply was accepted on the IPv6 socket")
+	}
+}
+
+// TestIPv6RoundsConvergeOnDestination traces an IPv6 destination at hop 4
+// behind three IPv6 routers.
+func TestIPv6RoundsConvergeOnDestination(t *testing.T) {
+	path := newFakePath()
+	path.routers = []netip.Addr{netip.MustParseAddr("2001:db8:1::1"), netip.MustParseAddr("2001:db8:1::2"), netip.MustParseAddr("2001:db8:1::3")}
+	rec, r, clock := newTestRunnerAt(t, path, Options{Interval: 2500 * time.Millisecond, Timeout: 2 * time.Second, MaxTTL: 30}, testDest6)
+
+	runRounds(r, clock, 3)
+
+	assertReplies(t, rec.replies, map[hopKey]int{
+		{1, "2001:db8:1::1", false}: 3,
+		{2, "2001:db8:1::2", false}: 3,
+		{3, "2001:db8:1::3", false}: 3,
+		{4, "2001:db8::9", true}:    3,
+	})
+	if !slices.Equal(rec.destTTL, []int{0, 4, 4}) {
+		t.Fatalf("destination TTLs %v, want [0 4 4]", rec.destTTL)
+	}
+}
+
+// TestTraceRejectsUnavailableFamily covers a prober without an IPv6 socket.
+func TestTraceRejectsUnavailableFamily(t *testing.T) {
+	p := newProber(slog.New(slog.DiscardHandler), newFakePath(), nil)
+	if p.Supports(testDest6) || !p.Supports(testDest) {
+		t.Fatal("Supports does not follow the open sockets")
+	}
+	called := false
+	done := make(chan struct{})
+	go func() {
+		p.Trace(context.Background(), testDest6.String(), Options{Interval: time.Second, Timeout: 500 * time.Millisecond, MaxTTL: 4},
+			Callbacks{OnTargetIP: func(netip.Addr) { called = true }})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Trace of an unavailable family did not return")
+	}
+	if called {
+		t.Fatal("Trace started on an unavailable family")
 	}
 }
 
@@ -246,7 +314,7 @@ func TestResolveKeepsCurrentAddress(t *testing.T) {
 	a, b := netip.MustParseAddr("192.0.2.9"), netip.MustParseAddr("192.0.2.10")
 	path := newFakePath()
 	path.answers = func(int, int) bool { return false }
-	p := newProber(slog.New(slog.DiscardHandler), path)
+	p := newProber(slog.New(slog.DiscardHandler), path, nil)
 	p.spacing = 0
 	var answer []netip.Addr
 	var answerErr error
@@ -295,11 +363,11 @@ func TestResolveKeepsCurrentAddress(t *testing.T) {
 func TestTraceThroughReceiveLoop(t *testing.T) {
 	path := newFakePath()
 	path.async = make(chan packet, 256)
-	p := newProber(slog.New(slog.DiscardHandler), path)
+	p := newProber(slog.New(slog.DiscardHandler), path, nil)
 	p.spacing = 0
 	p.resolve = func(context.Context, string) ([]netip.Addr, error) { return []netip.Addr{testDest}, nil }
 	path.prober = p
-	go p.receive()
+	p.start()
 
 	var mu sync.Mutex
 	var targetIPs []netip.Addr
@@ -392,18 +460,28 @@ func (c *fakeClock) Advance(d time.Duration) {
 // before returning.
 func newTestRunner(t *testing.T, path *fakePath, opts Options) (*recorder, *runner, *fakeClock) {
 	t.Helper()
+	return newTestRunnerAt(t, path, opts, testDest)
+}
+
+func newTestRunnerAt(t *testing.T, path *fakePath, opts Options, dest netip.Addr) (*recorder, *runner, *fakeClock) {
+	t.Helper()
 	clock := &fakeClock{now: time.Unix(1_700_000_000, 0)}
-	p := newProber(slog.New(slog.DiscardHandler), path)
+	var p *Prober
+	if dest.Is6() {
+		p = newProber(slog.New(slog.DiscardHandler), nil, path)
+	} else {
+		p = newProber(slog.New(slog.DiscardHandler), path, nil)
+	}
 	p.now = clock.Now
 	p.spacing = 0
 	path.prober = p
 	path.clock = clock
 	rec := &recorder{timeouts: map[int]int{}, replies: map[hopKey]int{}}
-	r := p.newRunner(testDest.String(), opts, rec.callbacks())
+	r := p.newRunner(dest.String(), opts, rec.callbacks())
 	if !p.register(r) {
 		t.Fatal("register failed")
 	}
-	r.setIP(testDest)
+	r.setIP(dest)
 	return rec, r, clock
 }
 
@@ -473,8 +551,14 @@ func (f *fakePath) sent(ttl int) int {
 	return f.sends[ttl]
 }
 
+// Send answers like the simulated path would, in ICMPv6 when dst is IPv6.
 func (f *fakePath) Send(b []byte, ttl int, dst netip.Addr) error {
-	msg, err := icmp.ParseMessage(1, b)
+	v6 := dst.Is6()
+	proto, echoReply, timeExceeded := 1, icmp.Type(ipv4.ICMPTypeEchoReply), icmp.Type(ipv4.ICMPTypeTimeExceeded)
+	if v6 {
+		proto, echoReply, timeExceeded = 58, ipv6.ICMPTypeEchoReply, ipv6.ICMPTypeTimeExceeded
+	}
+	msg, err := icmp.ParseMessage(proto, b)
 	if err != nil {
 		return err
 	}
@@ -492,13 +576,20 @@ func (f *fakePath) Send(b []byte, ttl int, dst netip.Addr) error {
 		if f.destDown {
 			return nil
 		}
-		reply, from = mustMarshal(&icmp.Message{Type: ipv4.ICMPTypeEchoReply, Body: echo}), dst
+		reply, from = mustMarshal(&icmp.Message{Type: echoReply, Body: echo}), dst
 	default:
 		quoteDst := dst
 		if f.quoteDst.IsValid() {
 			quoteDst = f.quoteDst
 		}
-		reply, from = timeExceededRaw(nil, append(ipHeader(quoteDst), b[:8]...)), f.routers[ttl-1]
+		var header []byte
+		if v6 {
+			header = ip6Header(quoteDst)
+		} else {
+			header = ipHeader(quoteDst)
+		}
+		quote := append(header, b[:8]...)
+		reply, from = mustMarshal(&icmp.Message{Type: timeExceeded, Body: &icmp.TimeExceeded{Data: quote}}), f.routers[ttl-1]
 	}
 	copies := 1
 	if f.duplicate {
@@ -553,6 +644,19 @@ func ipHeader(dst netip.Addr) []byte {
 	copy(h[12:16], src[:])
 	d := dst.As4()
 	copy(h[16:20], d[:])
+	return h
+}
+
+func ip6Header(dst netip.Addr) []byte {
+	h := make([]byte, ipv6.HeaderLen)
+	h[0] = 0x60
+	h[5] = 8 // payload length: the 8-byte echo header
+	h[6] = 58
+	h[7] = 1
+	src := testSource6.As16()
+	copy(h[8:24], src[:])
+	d := dst.As16()
+	copy(h[24:40], d[:])
 	return h
 }
 
