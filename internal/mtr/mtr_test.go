@@ -12,6 +12,7 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/pinglens/pinglens/internal/protocol"
+	"github.com/pinglens/pinglens/internal/traceroute"
 )
 
 func TestBuildArgsUsesFixedFlags(t *testing.T) {
@@ -57,22 +58,13 @@ func TestParseJSON(t *testing.T) {
 	}
 }
 
-func TestASNQuery(t *testing.T) {
-	if got := asnQuery(mustAddr("203.0.113.9")); got != "9.113.0.203.origin.asn.cymru.com" {
-		t.Fatalf("unexpected IPv4 query: %s", got)
-	}
-	if got := asnQuery(mustAddr("2001:db8::1")); got == "" || got[len(got)-21:] != "origin6.asn.cymru.com" {
-		t.Fatalf("unexpected IPv6 query: %s", got)
-	}
-}
-
 // TestEnrichHopsBoundsSlowReverseDNS covers the reason mtr runs with
 // --no-dns: one hop whose PTR server never answers must not hold back the
 // trace or the names of the other hops.
 func TestEnrichHopsBoundsSlowReverseDNS(t *testing.T) {
-	previous := lookupTimeout
-	lookupTimeout = 300 * time.Millisecond
-	t.Cleanup(func() { lookupTimeout = previous })
+	previous := traceroute.LookupTimeout
+	traceroute.LookupTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { traceroute.LookupTimeout = previous })
 
 	resolver, _ := fakeResolver(t, map[string]dnsmessage.ResourceBody{
 		"1.2.0.192.in-addr.arpa.": &dnsmessage.PTRResource{PTR: dnsmessage.MustNewName("gw.example.net.")},
@@ -97,9 +89,9 @@ func TestEnrichHopsBoundsSlowReverseDNS(t *testing.T) {
 }
 
 func TestEnrichHopsNamesEachASOnce(t *testing.T) {
-	previous := lookupTimeout
-	lookupTimeout = 300 * time.Millisecond
-	t.Cleanup(func() { lookupTimeout = previous })
+	previous := traceroute.LookupTimeout
+	traceroute.LookupTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { traceroute.LookupTimeout = previous })
 
 	resolver, queries := fakeResolver(t, map[string]dnsmessage.ResourceBody{
 		"8.8.8.8.origin.asn.cymru.com.": txt("15169 | 8.8.8.0/24 | US | arin | 2023-12-28"),
