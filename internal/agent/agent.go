@@ -141,7 +141,7 @@ func executeJob(ctx context.Context, client *http.Client, cfg Config, job protoc
 	traceDone := make(chan struct{})
 	go func() {
 		defer close(traceDone)
-		traceLoop(jobCtx, tr, names, job, resolved, event)
+		traceLoop(jobCtx, tr, names, checkRoute, job, resolved, event)
 	}()
 
 	results := make([]ping.Result, 0, job.Count)

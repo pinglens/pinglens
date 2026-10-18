@@ -2,7 +2,10 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"net"
 	"net/netip"
+	"os"
 	"sync"
 	"time"
 
@@ -52,14 +55,21 @@ func traceSettings(cfg protocol.TraceConfig) (traceroute.Options, time.Duration)
 }
 
 // traceLoop traces addr for the life of ctx and posts the rolling hop table
-// every report interval and once more when the trace ends.
-func traceLoop(ctx context.Context, tr tracer, names hopNamer, job protocol.ProbeJob, addr netip.Addr, event func(protocol.AgentEvent) bool) {
+// every report interval and once more when the trace ends. route checks that
+// addr is routable before the trace starts.
+func traceLoop(ctx context.Context, tr tracer, names hopNamer, route func(netip.Addr) error, job protocol.ProbeJob, addr netip.Addr, event func(protocol.AgentEvent) bool) {
 	resolved := addr.String()
 	post := func(report protocol.TraceReport) bool {
 		return event(protocol.AgentEvent{Type: "trace", Target: job.Target, Resolved: resolved, Trace: &report})
 	}
 	if !tr.Supports(addr) {
 		post(protocol.TraceReport{Error: "this agent cannot trace " + addrFamily(addr) + " targets"})
+		return
+	}
+	// Without a route every probe fails to send, which the table would show
+	// as 100% loss at every hop; report the cause instead, as mtr did.
+	if err := route(addr); err != nil {
+		post(protocol.TraceReport{Error: "cannot trace " + resolved + ": " + err.Error()})
 		return
 	}
 	opts, every := traceSettings(job.Trace)
@@ -94,6 +104,20 @@ func addrFamily(addr netip.Addr) string {
 		return "IPv4"
 	}
 	return "IPv6"
+}
+
+// checkRoute asks the kernel for a route to addr by connecting a UDP socket,
+// which sends nothing; mtr runs the same check before it probes.
+func checkRoute(addr netip.Addr) error {
+	conn, err := net.DialUDP("udp", nil, net.UDPAddrFromAddrPort(netip.AddrPortFrom(addr, 33434)))
+	if err != nil {
+		// Keep the cause ("network is unreachable"), not the dial details.
+		if se := (*os.SyscallError)(nil); errors.As(err, &se) {
+			return se.Err
+		}
+		return err
+	}
+	return conn.Close()
 }
 
 // hopTable accumulates probe outcomes per TTL since the job started.

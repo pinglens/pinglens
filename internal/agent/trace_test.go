@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/netip"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -16,6 +17,8 @@ var (
 	hop1New = netip.MustParseAddr("192.0.2.11")
 	dest    = netip.MustParseAddr("198.51.100.9")
 )
+
+func routable(netip.Addr) error { return nil }
 
 func TestHopTableReport(t *testing.T) {
 	table := &hopTable{}
@@ -72,10 +75,26 @@ func TestHopTableReportUnreached(t *testing.T) {
 
 func TestTraceLoopReportsUnsupportedFamily(t *testing.T) {
 	var events []protocol.AgentEvent
-	traceLoop(context.Background(), &fakeTracer{supports: false}, fakeNames{}, protocol.ProbeJob{Target: "example.net"},
+	traceLoop(context.Background(), &fakeTracer{supports: false}, fakeNames{}, routable, protocol.ProbeJob{Target: "example.net"},
 		netip.MustParseAddr("2001:db8::9"), func(e protocol.AgentEvent) bool { events = append(events, e); return true })
 	if len(events) != 1 || events[0].Type != "trace" || events[0].Trace.Error != "this agent cannot trace IPv6 targets" {
 		t.Fatalf("events = %+v", events)
+	}
+}
+
+// TestTraceLoopReportsNoRoute covers a family whose socket opens but which
+// has no route, such as IPv6 on loopback only: the trace reports why it
+// cannot run instead of starting and losing every probe.
+func TestTraceLoopReportsNoRoute(t *testing.T) {
+	tr := &fakeTracer{supports: true}
+	var events []protocol.AgentEvent
+	traceLoop(context.Background(), tr, fakeNames{}, func(netip.Addr) error { return syscall.ENETUNREACH }, protocol.ProbeJob{Target: "example.net"},
+		netip.MustParseAddr("2001:db8::9"), func(e protocol.AgentEvent) bool { events = append(events, e); return true })
+	if len(events) != 1 || events[0].Trace.Error != "cannot trace 2001:db8::9: network is unreachable" {
+		t.Fatalf("events = %+v", events)
+	}
+	if tr.host != "" {
+		t.Fatal("traced a target without a route")
 	}
 }
 
@@ -89,7 +108,7 @@ func TestTraceLoopReports(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		traceLoop(ctx, tr, fakeNames{}, protocol.ProbeJob{Target: "example.net", Trace: protocol.TraceConfig{ReportMillis: 20}}, dest,
+		traceLoop(ctx, tr, fakeNames{}, routable, protocol.ProbeJob{Target: "example.net", Trace: protocol.TraceConfig{ReportMillis: 20}}, dest,
 			func(e protocol.AgentEvent) bool {
 				mu.Lock()
 				defer mu.Unlock()
