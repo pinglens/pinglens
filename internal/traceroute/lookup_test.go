@@ -149,6 +149,54 @@ func TestHopNamesQueryEachASNameOnce(t *testing.T) {
 	}
 }
 
+// TestHopNamesSettleAfterRepeatedFailures covers a hop whose PTR lookups
+// time out, as many do while every trace starts at once: it is held back
+// rather than exported with an empty name until failuresToSettle lookups
+// failed, and a later answer still names it.
+func TestHopNamesSettleAfterRepeatedFailures(t *testing.T) {
+	dns, names, clock := newTestHopNames(t)
+	exported := func() (HopName, bool) {
+		var got HopName
+		found := false
+		names.Range(func(addr netip.Addr, name HopName) { got, found = name, addr == privateHop })
+		return got, found
+	}
+	for attempt := 1; attempt < failuresToSettle; attempt++ {
+		lookup(t, names, privateHop)
+		if _, found := exported(); found || names.Pending() != 1 {
+			t.Fatalf("after %d failed lookups: exported %v, pending %d; want held back", attempt, found, names.Pending())
+		}
+		clock.Advance(failureRetry)
+	}
+	lookup(t, names, privateHop)
+	if name, found := exported(); !found || name.Host != "" || names.Pending() != 0 {
+		t.Fatalf("after %d failed lookups: exported %v as %+v, pending %d; want it unnamed", failuresToSettle, found, name, names.Pending())
+	}
+	dns.set(privatePTR, ptr("gw1.example.net."))
+	clock.Advance(failureRetry)
+	lookup(t, names, privateHop)
+	if name, _ := exported(); name.Host != "gw1.example.net" {
+		t.Fatalf("after the PTR answered: %+v", name)
+	}
+}
+
+func TestJitterLifetimeSpreadsWithinBounds(t *testing.T) {
+	lo, hi := time.Duration(float64(time.Hour)*(1-lifetimeJitter)), time.Duration(float64(time.Hour)*(1+lifetimeJitter))
+	minSeen, maxSeen := hi, lo
+	for range 1000 {
+		d := jitterLifetime(time.Hour)
+		if d < lo || d >= hi {
+			t.Fatalf("jitterLifetime(1h) = %s, outside [%s, %s)", d, lo, hi)
+		}
+		minSeen, maxSeen = min(minSeen, d), max(maxSeen, d)
+	}
+	// Lookups that finished together must come due across most of the
+	// window, not in one minute.
+	if maxSeen-minSeen < 20*time.Minute {
+		t.Fatalf("1000 lifetimes span only %s..%s", minSeen, maxSeen)
+	}
+}
+
 func newTestHopNames(t *testing.T) (*fakeDNS, *HopNames, *fakeClock) {
 	t.Helper()
 	previous := lookupTimeout
@@ -158,6 +206,8 @@ func newTestHopNames(t *testing.T) (*fakeDNS, *HopNames, *fakeClock) {
 	clock := &fakeClock{now: time.Unix(1_700_000_000, 0)}
 	names := NewHopNames(dns.resolver, time.Hour)
 	names.now = clock.Now
+	// Exact lifetimes keep the expiry tests on fixed boundaries.
+	names.jitter = func(d time.Duration) time.Duration { return d }
 	return dns, names, clock
 }
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"net/netip"
 	"strings"
@@ -22,11 +23,18 @@ const (
 	maxHopLookups = 8
 	// How long a lookup outcome is used before the lookup is repeated,
 	// counted from when it finished. These are freshness limits for
-	// annotations, not DNS TTLs: a changed record shows within an hour, a
-	// new one within five minutes.
+	// annotations, not DNS TTLs: a changed record shows within about an
+	// hour, a new one within about five minutes. Each is jittered by
+	// lifetimeJitter so lookups that finished together, such as every hop
+	// at startup, are not all repeated in the same minute.
 	answerLifetime  = time.Hour
 	missingLifetime = 5 * time.Minute
 	failureRetry    = 30 * time.Second
+	lifetimeJitter  = 0.2
+	// failuresToSettle is how many consecutive failed lookups settle a
+	// field without an answer, so a hop whose PTR server never answers is
+	// still exported (unnamed) after about a minute and a half.
+	failuresToSettle = 3
 )
 
 // HopName annotates a hop address. Each field is empty when there is no
@@ -39,15 +47,16 @@ type HopName struct {
 
 // HopNames annotates hop addresses with three independent lookups: the PTR
 // name and origin ASN by address, and the AS description by ASN. Lookups run
-// asynchronously, one at a time per field. A positive answer is used for an
-// hour after its lookup finished, a missing record (NXDOMAIN, NODATA or an
-// unusable answer) for five minutes, and a failed lookup (timeout, SERVFAIL)
-// is retried after 30 seconds while keeping the previous answer. Entries
-// unseen for the retention period are pruned.
+// asynchronously, one at a time per field. A positive answer is used for
+// about an hour after its lookup finished, a missing record (NXDOMAIN, NODATA
+// or an unusable answer) for about five minutes, and a failed lookup
+// (timeout, SERVFAIL) is retried after about 30 seconds while keeping the
+// previous answer. Entries unseen for the retention period are pruned.
 type HopNames struct {
 	resolver *net.Resolver
 	retain   time.Duration
 	now      func() time.Time
+	jitter   func(time.Duration) time.Duration
 	slots    chan struct{}
 
 	mu      sync.Mutex
@@ -71,10 +80,12 @@ type asNameEntry struct {
 // cachedLookup is one field's latest answer and when to look it up again.
 type cachedLookup struct {
 	value string
-	// done is set once any lookup finished, answered or failed.
-	done    bool
-	busy    bool
-	retryAt time.Time
+	// settled is set once a lookup answered, or failuresToSettle lookups
+	// failed in a row; until then the field has no usable value.
+	settled  bool
+	failures int
+	busy     bool
+	retryAt  time.Time
 }
 
 // NewHopNames returns an empty cache that prunes entries unseen for retain.
@@ -87,15 +98,22 @@ func NewHopNames(resolver *net.Resolver, retain time.Duration) *HopNames {
 		resolver: resolver,
 		retain:   retain,
 		now:      time.Now,
+		jitter:   jitterLifetime,
 		slots:    make(chan struct{}, maxHopLookups),
 		hops:     map[netip.Addr]*hopEntry{},
 		asNames:  map[string]*asNameEntry{},
 	}
 }
 
+// jitterLifetime scales d by a random factor in [1-lifetimeJitter,
+// 1+lifetimeJitter).
+func jitterLifetime(d time.Duration) time.Duration {
+	return time.Duration(float64(d) * (1 - lifetimeJitter + 2*lifetimeJitter*rand.Float64()))
+}
+
 // Get marks addr as seen, starts any lookup that is due, and returns the
 // current fields. ok is false until every lookup that applies to addr has
-// finished once.
+// settled.
 func (c *HopNames) Get(addr netip.Addr) (HopName, bool) {
 	now := c.now()
 	c.mu.Lock()
@@ -119,7 +137,7 @@ func (c *HopNames) Get(addr netip.Addr) (HopName, bool) {
 }
 
 // Range calls fn for every entry seen within the retention period whose
-// lookups have all finished once. fn runs without the cache locked.
+// lookups have all settled. fn runs without the cache locked.
 func (c *HopNames) Range(fn func(netip.Addr, HopName)) {
 	type hop struct {
 		addr netip.Addr
@@ -140,6 +158,21 @@ func (c *HopNames) Range(fn func(netip.Addr, HopName)) {
 	for _, h := range hops {
 		fn(h.addr, h.name)
 	}
+}
+
+// Pending counts the entries seen within the retention period whose lookups
+// have not all settled yet.
+func (c *HopNames) Pending() int {
+	cutoff := c.now().Add(-c.retain)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for _, entry := range c.hops {
+		if _, ok := c.nameLocked(entry); entry.seen.After(cutoff) && !ok {
+			n++
+		}
+	}
+	return n
 }
 
 // Prune drops hop and AS-name entries unseen for the retention period.
@@ -165,16 +198,16 @@ func (c *HopNames) Prune() {
 // description.
 func (c *HopNames) nameLocked(entry *hopEntry) (HopName, bool) {
 	name := HopName{Host: entry.ptr.value}
-	done := entry.ptr.done
+	done := entry.ptr.settled
 	if entry.noASN {
 		return name, done
 	}
-	done = done && entry.asn.done
+	done = done && entry.asn.settled
 	if entry.asn.value == "" {
 		return name, done
 	}
 	name.ASN = entry.asn.value
-	if as := c.asNames[name.ASN]; as != nil && as.name.done {
+	if as := c.asNames[name.ASN]; as != nil && as.name.settled {
 		name.ASName = as.name.value
 	} else {
 		done = false
@@ -214,7 +247,7 @@ func (c *HopNames) refreshLocked(rec *cachedLookup, now time.Time, lookup func(c
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		done := c.now()
-		rec.store(value, err, done)
+		rec.store(value, err, done, c.jitter)
 		if after != nil {
 			after(done)
 		}
@@ -224,18 +257,21 @@ func (c *HopNames) refreshLocked(rec *cachedLookup, now time.Time, lookup func(c
 // store records a lookup outcome. Lifetimes count from now, the moment the
 // lookup finished, so a hop that keeps replying cannot keep an answer alive.
 // A failure keeps the previous answer.
-func (r *cachedLookup) store(value string, err error, now time.Time) {
+func (r *cachedLookup) store(value string, err error, now time.Time, jitter func(time.Duration) time.Duration) {
 	r.busy = false
-	r.done = true
-	switch {
-	case err != nil:
-		r.retryAt = now.Add(failureRetry)
-	case value == "":
-		r.value = ""
-		r.retryAt = now.Add(missingLifetime)
-	default:
-		r.value = value
-		r.retryAt = now.Add(answerLifetime)
+	if err != nil {
+		r.failures++
+		r.settled = r.settled || r.failures >= failuresToSettle
+		r.retryAt = now.Add(jitter(failureRetry))
+		return
+	}
+	r.settled = true
+	r.failures = 0
+	r.value = value
+	if value == "" {
+		r.retryAt = now.Add(jitter(missingLifetime))
+	} else {
+		r.retryAt = now.Add(jitter(answerLifetime))
 	}
 }
 
