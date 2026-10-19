@@ -26,7 +26,8 @@ const (
 	// change.
 	staleAfter = time.Hour
 	gcInterval = 5 * time.Minute
-	// maxWarmup bounds how long /readyz waits for hop names, so a broken
+	// maxWarmup bounds how long /readyz waits for traces to discover their
+	// paths and for hop names, so a target that never resolves or a broken
 	// resolver delays readiness rather than blocking it.
 	maxWarmup = 5 * time.Minute
 )
@@ -126,25 +127,27 @@ func (e *Exporter) Run(ctx context.Context, reloadInterval time.Duration) {
 	}
 }
 
-// checkWarm latches warm once every trace has had two rounds to discover its
-// path and every hop name found so far has settled, or after maxWarmup.
-// Until then /readyz fails, so a rolling update keeps the previous pod, with
-// its names, serving while this one looks its hops up.
+// checkWarm latches warm once every trace has discovered its path and every
+// hop name found so far has settled, or after maxWarmup. Until then /readyz
+// fails, so a rolling update keeps the previous pod, with its names, serving
+// while this one finds and looks up its hops.
 func (e *Exporter) checkWarm() bool {
 	e.mu.Lock()
-	discovery := 2*e.cfg.Interval + e.cfg.Timeout
 	started := e.started
 	e.mu.Unlock()
 	elapsed := e.now().Sub(started)
-	if elapsed < discovery {
-		return false
+	discovering := 0
+	for _, state := range e.states() {
+		if !state.discovered() {
+			discovering++
+		}
 	}
 	pending := e.names.Pending()
-	if pending > 0 && elapsed < maxWarmup {
+	if (discovering > 0 || pending > 0) && elapsed < maxWarmup {
 		return false
 	}
 	e.warm.Store(true)
-	e.logger.Info("warmed up", "after", elapsed.Round(time.Second), "pending_hop_names", pending)
+	e.logger.Info("warmed up", "after", elapsed.Round(time.Second), "discovering_targets", discovering, "pending_hop_names", pending)
 	return true
 }
 
@@ -164,7 +167,7 @@ func (e *Exporter) Handler() http.Handler {
 	})
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
 		if !e.warm.Load() {
-			http.Error(w, fmt.Sprintf("warming up: %d hop names pending", e.names.Pending()), http.StatusServiceUnavailable)
+			http.Error(w, "warming up", http.StatusServiceUnavailable)
 			return
 		}
 		_, _ = w.Write([]byte("ok\n"))
@@ -292,11 +295,13 @@ type targetState struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 
-	mu      sync.Mutex
-	labels  map[string]string
-	up      bool
-	ip      netip.Addr
-	destTTL int
+	mu     sync.Mutex
+	labels map[string]string
+	up     bool
+	// resolveFailed is set while the latest resolution failed.
+	resolveFailed bool
+	ip            netip.Addr
+	destTTL       int
 	// sent counts probes per TTL once they are answered or time out, so it
 	// and the reply counts always describe the same probes. Probes the
 	// engine discards (past the destination, or in flight at an address
@@ -350,9 +355,21 @@ func (s *targetState) callbacks(names HopNamer, now func() time.Time) traceroute
 		OnTargetUp: func(up bool) {
 			s.mu.Lock()
 			s.up = up
+			s.resolveFailed = !up
 			s.mu.Unlock()
 		},
 	}
+}
+
+// discovered reports whether the trace has found its path. Every round ends
+// with one outcome at TTL 1, so the third such outcome comes two intervals
+// after round 1 began, past round 1's timeout: round 1 has seen every hop
+// that answers and asked for its name. A target that failed to resolve and
+// has no address has nothing to discover yet.
+func (s *targetState) discovered() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sent[1] >= 3 || (s.resolveFailed && !s.ip.IsValid())
 }
 
 func (s *targetState) countSentLocked(ttl int, at time.Time) {

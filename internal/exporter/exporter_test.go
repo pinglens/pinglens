@@ -180,43 +180,78 @@ func TestInvalidSeriesDropped(t *testing.T) {
 	}
 }
 
-// TestReadyzWaitsForPathsAndHopNames covers the warm-up a rolling update
-// waits on: /readyz fails until traces had two rounds plus the timeout to
-// discover their paths and no hop name is pending, then stays ready; a
-// resolver that never settles delays it only until maxWarmup.
-func TestReadyzWaitsForPathsAndHopNames(t *testing.T) {
+// TestReadyzWaitsForDiscoveryAndHopNames covers the warm-up a rolling update
+// waits on: /readyz fails while a target is still resolving or has not
+// finished its first round, and while a hop name is pending, then stays
+// ready; targets that never get that far delay it only until maxWarmup.
+func TestReadyzWaitsForDiscoveryAndHopNames(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yml")
-	writeFile(t, path, "interval: 2s\ntimeout: 1s\ntargets:\n  - host: 1.1.1.1\n")
+	writeFile(t, path, "targets:\n  - host: 1.1.1.1\n  - host: bad.invalid\n")
 	start := time.Unix(1_700_000_000, 0)
-	for name, steps := range map[string][]struct {
+	rounds := func(cb traceroute.Callbacks, n int) {
+		for range n {
+			cb.OnTimeout(1)
+		}
+	}
+	type step struct {
 		at      time.Duration
+		do      func(one, bad traceroute.Callbacks)
 		pending int64
 		want    int
-	}{
-		"names settle": {
-			{4 * time.Second, 0, http.StatusServiceUnavailable}, // before 2 rounds + timeout
-			{5 * time.Second, 2, http.StatusServiceUnavailable},
-			{6 * time.Second, 0, http.StatusOK},
-			{7 * time.Second, 3, http.StatusOK}, // new hops later do not unready it
+	}
+	for name, steps := range map[string][]step{
+		"discovery then names": {
+			// Slow resolution: no hops, so no names pending, yet not ready.
+			{10 * time.Second, nil, 0, http.StatusServiceUnavailable},
+			{11 * time.Second, func(one, _ traceroute.Callbacks) {
+				one.OnTargetIP(netip.MustParseAddr("1.1.1.1"))
+				one.OnTargetUp(true)
+				rounds(one, 2)
+			}, 0, http.StatusServiceUnavailable},
+			// bad.invalid failed to resolve: nothing to discover.
+			{12 * time.Second, func(one, bad traceroute.Callbacks) {
+				bad.OnTargetUp(false)
+				rounds(one, 1)
+			}, 2, http.StatusServiceUnavailable},
+			{13 * time.Second, nil, 0, http.StatusOK},
+			// Later hops and failures do not unready it.
+			{14 * time.Second, func(one, _ traceroute.Callbacks) { one.OnTargetUp(false) }, 3, http.StatusOK},
 		},
-		"names never settle": {
-			{maxWarmup - time.Second, 5, http.StatusServiceUnavailable},
-			{maxWarmup, 5, http.StatusOK},
+		"never discovered": {
+			{maxWarmup - time.Second, nil, 0, http.StatusServiceUnavailable},
+			{maxWarmup, nil, 0, http.StatusOK},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			tracer := newFakeTracer()
 			pending := &atomic.Int64{}
-			e, err := New(slog.New(slog.DiscardHandler), path, newFakeTracer(), fakeNames{pending: pending})
+			e, err := New(slog.New(slog.DiscardHandler), path, tracer, fakeNames{pending: pending})
 			if err != nil {
 				t.Fatal(err)
 			}
 			now := start
 			e.now = func() time.Time { return now }
+			// Start the traces as Run does, without its warm-up ticker, so
+			// the test drives checkWarm on its own clock.
+			ctx, cancel := context.WithCancel(context.Background())
+			e.mu.Lock()
+			e.ctx = ctx
 			e.started = start
+			for _, target := range e.cfg.Targets {
+				e.startLocked(target)
+			}
+			e.mu.Unlock()
+			defer e.stopAll()
+			defer cancel()
+			tracer.wait(t, "1.1.1.1", "bad.invalid")
+			one, bad := tracer.callbacks("1.1.1.1"), tracer.callbacks("bad.invalid")
 			srv := httptest.NewServer(e.Handler())
 			defer srv.Close()
 			for _, step := range steps {
 				now = start.Add(step.at)
+				if step.do != nil {
+					step.do(one, bad)
+				}
 				pending.Store(step.pending)
 				if !e.warm.Load() {
 					e.checkWarm()
