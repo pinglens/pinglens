@@ -3,10 +3,13 @@ package exporter
 import (
 	"context"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -177,6 +180,60 @@ func TestInvalidSeriesDropped(t *testing.T) {
 	}
 }
 
+// TestReadyzWaitsForPathsAndHopNames covers the warm-up a rolling update
+// waits on: /readyz fails until traces had two rounds plus the timeout to
+// discover their paths and no hop name is pending, then stays ready; a
+// resolver that never settles delays it only until maxWarmup.
+func TestReadyzWaitsForPathsAndHopNames(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yml")
+	writeFile(t, path, "interval: 2s\ntimeout: 1s\ntargets:\n  - host: 1.1.1.1\n")
+	start := time.Unix(1_700_000_000, 0)
+	for name, steps := range map[string][]struct {
+		at      time.Duration
+		pending int64
+		want    int
+	}{
+		"names settle": {
+			{4 * time.Second, 0, http.StatusServiceUnavailable}, // before 2 rounds + timeout
+			{5 * time.Second, 2, http.StatusServiceUnavailable},
+			{6 * time.Second, 0, http.StatusOK},
+			{7 * time.Second, 3, http.StatusOK}, // new hops later do not unready it
+		},
+		"names never settle": {
+			{maxWarmup - time.Second, 5, http.StatusServiceUnavailable},
+			{maxWarmup, 5, http.StatusOK},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			pending := &atomic.Int64{}
+			e, err := New(slog.New(slog.DiscardHandler), path, newFakeTracer(), fakeNames{pending: pending})
+			if err != nil {
+				t.Fatal(err)
+			}
+			now := start
+			e.now = func() time.Time { return now }
+			e.started = start
+			srv := httptest.NewServer(e.Handler())
+			defer srv.Close()
+			for _, step := range steps {
+				now = start.Add(step.at)
+				pending.Store(step.pending)
+				if !e.warm.Load() {
+					e.checkWarm()
+				}
+				resp, err := srv.Client().Get(srv.URL + "/readyz")
+				if err != nil {
+					t.Fatal(err)
+				}
+				resp.Body.Close()
+				if resp.StatusCode != step.want {
+					t.Fatalf("at %s with %d pending: /readyz %d, want %d", step.at, step.pending, resp.StatusCode, step.want)
+				}
+			}
+		})
+	}
+}
+
 func startExporter(t *testing.T, path string, tracer *fakeTracer, now func() time.Time) (*Exporter, *prometheus.Registry) {
 	t.Helper()
 	e, err := New(slog.New(slog.DiscardHandler), path, tracer, fakeNames{})
@@ -265,11 +322,20 @@ func (f *fakeTracer) stopped(host string) bool {
 }
 
 // fakeNames knows one router; with invalid set it also holds an AS name
-// that is not UTF-8.
-type fakeNames struct{ invalid bool }
+// that is not UTF-8. pending, when set, is what Pending reports.
+type fakeNames struct {
+	invalid bool
+	pending *atomic.Int64
+}
 
 func (fakeNames) Get(netip.Addr) (traceroute.HopName, bool) { return traceroute.HopName{}, false }
 func (fakeNames) Prune()                                    {}
+func (f fakeNames) Pending() int {
+	if f.pending == nil {
+		return 0
+	}
+	return int(f.pending.Load())
+}
 func (f fakeNames) Range(fn func(netip.Addr, traceroute.HopName)) {
 	fn(netip.MustParseAddr("10.0.0.1"), traceroute.HopName{Host: "r1.example.net", ASN: "AS64500", ASName: "EXAMPLE"})
 	if f.invalid {

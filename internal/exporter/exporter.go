@@ -26,6 +26,9 @@ const (
 	// change.
 	staleAfter = time.Hour
 	gcInterval = 5 * time.Minute
+	// maxWarmup bounds how long /readyz waits for hop names, so a broken
+	// resolver delays readiness rather than blocking it.
+	maxWarmup = 5 * time.Minute
 )
 
 // Tracer runs one continuous trace until ctx is cancelled;
@@ -38,6 +41,7 @@ type Tracer interface {
 type HopNamer interface {
 	Get(addr netip.Addr) (traceroute.HopName, bool)
 	Range(fn func(netip.Addr, traceroute.HopName))
+	Pending() int
 	Prune()
 }
 
@@ -51,6 +55,10 @@ type Exporter struct {
 	names  HopNamer
 	now    func() time.Time
 	ready  atomic.Bool
+	// warm latches once traces have discovered their paths and the hop
+	// names they found are looked up; see checkWarm.
+	warm    atomic.Bool
+	started time.Time
 
 	mu      sync.Mutex
 	cfg     Config
@@ -87,6 +95,7 @@ func New(logger *slog.Logger, path string, tracer Tracer, names HopNamer) (*Expo
 func (e *Exporter) Run(ctx context.Context, reloadInterval time.Duration) {
 	e.mu.Lock()
 	e.ctx = ctx
+	e.started = e.now()
 	for _, t := range e.cfg.Targets {
 		e.startLocked(t)
 	}
@@ -98,6 +107,8 @@ func (e *Exporter) Run(ctx context.Context, reloadInterval time.Duration) {
 	defer reload.Stop()
 	gc := time.NewTicker(gcInterval)
 	defer gc.Stop()
+	warmup := time.NewTicker(time.Second)
+	defer warmup.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -107,12 +118,38 @@ func (e *Exporter) Run(ctx context.Context, reloadInterval time.Duration) {
 		case <-gc.C:
 			e.names.Prune()
 			e.pruneIdle()
+		case <-warmup.C:
+			if e.checkWarm() {
+				warmup.Stop()
+			}
 		}
 	}
 }
 
+// checkWarm latches warm once every trace has had two rounds to discover its
+// path and every hop name found so far has settled, or after maxWarmup.
+// Until then /readyz fails, so a rolling update keeps the previous pod, with
+// its names, serving while this one looks its hops up.
+func (e *Exporter) checkWarm() bool {
+	e.mu.Lock()
+	discovery := 2*e.cfg.Interval + e.cfg.Timeout
+	started := e.started
+	e.mu.Unlock()
+	elapsed := e.now().Sub(started)
+	if elapsed < discovery {
+		return false
+	}
+	pending := e.names.Pending()
+	if pending > 0 && elapsed < maxWarmup {
+		return false
+	}
+	e.warm.Store(true)
+	e.logger.Info("warmed up", "after", elapsed.Round(time.Second), "pending_hop_names", pending)
+	return true
+}
+
 // Handler serves /metrics from a registry holding only this exporter's
-// metrics, and /healthz once traces are running.
+// metrics, /healthz once traces are running, and /readyz once warm.
 func (e *Exporter) Handler() http.Handler {
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(e)
@@ -121,6 +158,13 @@ func (e *Exporter) Handler() http.Handler {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		if !e.ready.Load() {
 			http.Error(w, "starting", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte("ok\n"))
+	})
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		if !e.warm.Load() {
+			http.Error(w, fmt.Sprintf("warming up: %d hop names pending", e.names.Pending()), http.StatusServiceUnavailable)
 			return
 		}
 		_, _ = w.Write([]byte("ok\n"))
