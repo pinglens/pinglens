@@ -181,12 +181,13 @@ func TestInvalidSeriesDropped(t *testing.T) {
 }
 
 // TestReadyzWaitsForDiscoveryAndHopNames covers the warm-up a rolling update
-// waits on: /readyz fails while a target is still resolving or has not
-// finished its first round, and while a hop name is pending, then stays
-// ready; targets that never get that far delay it only until maxWarmup.
+// waits on: /readyz fails while the target is unresolved, including after a
+// transient resolution failure the engine retries, or has not finished its
+// first round, and while a hop name is pending, then stays ready; a target
+// that never gets that far delays it only until maxWarmup.
 func TestReadyzWaitsForDiscoveryAndHopNames(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yml")
-	writeFile(t, path, "targets:\n  - host: 1.1.1.1\n  - host: bad.invalid\n")
+	writeFile(t, path, "targets:\n  - host: example.net\n")
 	start := time.Unix(1_700_000_000, 0)
 	rounds := func(cb traceroute.Callbacks, n int) {
 		for range n {
@@ -195,30 +196,27 @@ func TestReadyzWaitsForDiscoveryAndHopNames(t *testing.T) {
 	}
 	type step struct {
 		at      time.Duration
-		do      func(one, bad traceroute.Callbacks)
+		do      func(traceroute.Callbacks)
 		pending int64
 		want    int
 	}
 	for name, steps := range map[string][]step{
-		"discovery then names": {
-			// Slow resolution: no hops, so no names pending, yet not ready.
-			{10 * time.Second, nil, 0, http.StatusServiceUnavailable},
-			{11 * time.Second, func(one, _ traceroute.Callbacks) {
-				one.OnTargetIP(netip.MustParseAddr("1.1.1.1"))
-				one.OnTargetUp(true)
-				rounds(one, 2)
-			}, 0, http.StatusServiceUnavailable},
-			// bad.invalid failed to resolve: nothing to discover.
-			{12 * time.Second, func(one, bad traceroute.Callbacks) {
-				bad.OnTargetUp(false)
-				rounds(one, 1)
-			}, 2, http.StatusServiceUnavailable},
-			{13 * time.Second, nil, 0, http.StatusOK},
+		"resolution recovers": {
+			// The first resolution timed out: no hops, so no names pending,
+			// yet not ready.
+			{7 * time.Second, func(cb traceroute.Callbacks) { cb.OnTargetUp(false) }, 0, http.StatusServiceUnavailable},
+			{40 * time.Second, func(cb traceroute.Callbacks) {
+				cb.OnTargetIP(netip.MustParseAddr("192.0.2.9"))
+				cb.OnTargetUp(true)
+				rounds(cb, 2)
+			}, 1, http.StatusServiceUnavailable},
+			{45 * time.Second, func(cb traceroute.Callbacks) { rounds(cb, 1) }, 2, http.StatusServiceUnavailable},
+			{46 * time.Second, nil, 0, http.StatusOK},
 			// Later hops and failures do not unready it.
-			{14 * time.Second, func(one, _ traceroute.Callbacks) { one.OnTargetUp(false) }, 3, http.StatusOK},
+			{47 * time.Second, func(cb traceroute.Callbacks) { cb.OnTargetUp(false) }, 3, http.StatusOK},
 		},
-		"never discovered": {
-			{maxWarmup - time.Second, nil, 0, http.StatusServiceUnavailable},
+		"never resolves": {
+			{maxWarmup - time.Second, func(cb traceroute.Callbacks) { cb.OnTargetUp(false) }, 0, http.StatusServiceUnavailable},
 			{maxWarmup, nil, 0, http.StatusOK},
 		},
 	} {
@@ -243,14 +241,14 @@ func TestReadyzWaitsForDiscoveryAndHopNames(t *testing.T) {
 			e.mu.Unlock()
 			defer e.stopAll()
 			defer cancel()
-			tracer.wait(t, "1.1.1.1", "bad.invalid")
-			one, bad := tracer.callbacks("1.1.1.1"), tracer.callbacks("bad.invalid")
+			tracer.wait(t, "example.net")
+			cb := tracer.callbacks("example.net")
 			srv := httptest.NewServer(e.Handler())
 			defer srv.Close()
 			for _, step := range steps {
 				now = start.Add(step.at)
 				if step.do != nil {
-					step.do(one, bad)
+					step.do(cb)
 				}
 				pending.Store(step.pending)
 				if !e.warm.Load() {

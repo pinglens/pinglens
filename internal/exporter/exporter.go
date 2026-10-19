@@ -295,13 +295,11 @@ type targetState struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 
-	mu     sync.Mutex
-	labels map[string]string
-	up     bool
-	// resolveFailed is set while the latest resolution failed.
-	resolveFailed bool
-	ip            netip.Addr
-	destTTL       int
+	mu      sync.Mutex
+	labels  map[string]string
+	up      bool
+	ip      netip.Addr
+	destTTL int
 	// sent counts probes per TTL once they are answered or time out, so it
 	// and the reply counts always describe the same probes. Probes the
 	// engine discards (past the destination, or in flight at an address
@@ -355,7 +353,6 @@ func (s *targetState) callbacks(names HopNamer, now func() time.Time) traceroute
 		OnTargetUp: func(up bool) {
 			s.mu.Lock()
 			s.up = up
-			s.resolveFailed = !up
 			s.mu.Unlock()
 		},
 	}
@@ -364,12 +361,14 @@ func (s *targetState) callbacks(names HopNamer, now func() time.Time) traceroute
 // discovered reports whether the trace has found its path. Every round ends
 // with one outcome at TTL 1, so the third such outcome comes two intervals
 // after round 1 began, past round 1's timeout: round 1 has seen every hop
-// that answers and asked for its name. A target that failed to resolve and
-// has no address has nothing to discover yet.
+// that answers and asked for its name. A target that has not resolved yet is
+// undiscovered, whether its lookup is slow or failed: the engine retries
+// failed resolutions, and maxWarmup bounds the wait for one that never
+// succeeds.
 func (s *targetState) discovered() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.sent[1] >= 3 || (s.resolveFailed && !s.ip.IsValid())
+	return s.sent[1] >= 3
 }
 
 func (s *targetState) countSentLocked(ttl int, at time.Time) {
