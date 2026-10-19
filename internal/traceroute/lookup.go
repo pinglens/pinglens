@@ -31,10 +31,12 @@ const (
 	missingLifetime = 5 * time.Minute
 	failureRetry    = 30 * time.Second
 	lifetimeJitter  = 0.2
-	// failuresToSettle is how many consecutive failed lookups settle a
-	// field without an answer, so a hop whose PTR server never answers is
-	// still exported (unnamed) after about a minute and a half.
-	failuresToSettle = 3
+	// settleAfter is how long a field may keep failing without ever
+	// answering before it settles empty, so a hop whose PTR server never
+	// answers is still exported, unnamed. It counts from the first failure
+	// and needs no further lookups, so it also settles a hop that stopped
+	// replying (and so stopped retrying) after one failed lookup.
+	settleAfter = 90 * time.Second
 )
 
 // HopName annotates a hop address. Each field is empty when there is no
@@ -80,12 +82,19 @@ type asNameEntry struct {
 // cachedLookup is one field's latest answer and when to look it up again.
 type cachedLookup struct {
 	value string
-	// settled is set once a lookup answered, or failuresToSettle lookups
-	// failed in a row; until then the field has no usable value.
-	settled  bool
-	failures int
-	busy     bool
-	retryAt  time.Time
+	// answered is set once a lookup answered (a record or a definitive
+	// miss); failingSince is when lookups started failing without an answer
+	// yet. See settled.
+	answered     bool
+	failingSince time.Time
+	busy         bool
+	retryAt      time.Time
+}
+
+// settled reports whether the field's value is usable at now: it answered,
+// or has failed for settleAfter.
+func (r *cachedLookup) settled(now time.Time) bool {
+	return r.answered || (!r.failingSince.IsZero() && !now.Before(r.failingSince.Add(settleAfter)))
 }
 
 // NewHopNames returns an empty cache that prunes entries unseen for retain.
@@ -133,7 +142,7 @@ func (c *HopNames) Get(addr netip.Addr) (HopName, bool) {
 		}, func(now time.Time) { c.touchASNameLocked(entry, now) })
 		c.touchASNameLocked(entry, now)
 	}
-	return c.nameLocked(entry)
+	return c.nameLocked(entry, now)
 }
 
 // Range calls fn for every entry seen within the retention period whose
@@ -143,14 +152,15 @@ func (c *HopNames) Range(fn func(netip.Addr, HopName)) {
 		addr netip.Addr
 		name HopName
 	}
-	cutoff := c.now().Add(-c.retain)
+	now := c.now()
+	cutoff := now.Add(-c.retain)
 	c.mu.Lock()
 	hops := make([]hop, 0, len(c.hops))
 	for addr, entry := range c.hops {
 		if !entry.seen.After(cutoff) {
 			continue
 		}
-		if name, ok := c.nameLocked(entry); ok {
+		if name, ok := c.nameLocked(entry, now); ok {
 			hops = append(hops, hop{addr, name})
 		}
 	}
@@ -163,12 +173,13 @@ func (c *HopNames) Range(fn func(netip.Addr, HopName)) {
 // Pending counts the entries seen within the retention period whose lookups
 // have not all settled yet.
 func (c *HopNames) Pending() int {
-	cutoff := c.now().Add(-c.retain)
+	now := c.now()
+	cutoff := now.Add(-c.retain)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	n := 0
 	for _, entry := range c.hops {
-		if _, ok := c.nameLocked(entry); entry.seen.After(cutoff) && !ok {
+		if _, ok := c.nameLocked(entry, now); entry.seen.After(cutoff) && !ok {
 			n++
 		}
 	}
@@ -193,21 +204,21 @@ func (c *HopNames) Prune() {
 	}
 }
 
-// nameLocked assembles entry's fields. The AS description belongs to the
-// current ASN, so an ASN change never pairs the new ASN with the old
-// description.
-func (c *HopNames) nameLocked(entry *hopEntry) (HopName, bool) {
+// nameLocked assembles entry's fields and whether they are all settled at
+// now. The AS description belongs to the current ASN, so an ASN change never
+// pairs the new ASN with the old description.
+func (c *HopNames) nameLocked(entry *hopEntry, now time.Time) (HopName, bool) {
 	name := HopName{Host: entry.ptr.value}
-	done := entry.ptr.settled
+	done := entry.ptr.settled(now)
 	if entry.noASN {
 		return name, done
 	}
-	done = done && entry.asn.settled
+	done = done && entry.asn.settled(now)
 	if entry.asn.value == "" {
 		return name, done
 	}
 	name.ASN = entry.asn.value
-	if as := c.asNames[name.ASN]; as != nil && as.name.settled {
+	if as := c.asNames[name.ASN]; as != nil && as.name.settled(now) {
 		name.ASName = as.name.value
 	} else {
 		done = false
@@ -260,13 +271,14 @@ func (c *HopNames) refreshLocked(rec *cachedLookup, now time.Time, lookup func(c
 func (r *cachedLookup) store(value string, err error, now time.Time, jitter func(time.Duration) time.Duration) {
 	r.busy = false
 	if err != nil {
-		r.failures++
-		r.settled = r.settled || r.failures >= failuresToSettle
+		if !r.answered && r.failingSince.IsZero() {
+			r.failingSince = now
+		}
 		r.retryAt = now.Add(jitter(failureRetry))
 		return
 	}
-	r.settled = true
-	r.failures = 0
+	r.answered = true
+	r.failingSince = time.Time{}
 	r.value = value
 	if value == "" {
 		r.retryAt = now.Add(jitter(missingLifetime))

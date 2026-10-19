@@ -149,11 +149,12 @@ func TestHopNamesQueryEachASNameOnce(t *testing.T) {
 	}
 }
 
-// TestHopNamesSettleAfterRepeatedFailures covers a hop whose PTR lookups
-// time out, as many do while every trace starts at once: it is held back
-// rather than exported with an empty name until failuresToSettle lookups
-// failed, and a later answer still names it.
-func TestHopNamesSettleAfterRepeatedFailures(t *testing.T) {
+// TestHopNamesSettleAfterFailingFor90s covers a hop that replied once while
+// every trace was starting, whose only PTR lookup timed out, and that then
+// left the path, so nothing retries it: it is held back rather than exported
+// with an empty name, settles unnamed settleAfter after the failure without
+// another query, and a later reply and answer still name it.
+func TestHopNamesSettleAfterFailingFor90s(t *testing.T) {
 	dns, names, clock := newTestHopNames(t)
 	exported := func() (HopName, bool) {
 		var got HopName
@@ -161,19 +162,19 @@ func TestHopNamesSettleAfterRepeatedFailures(t *testing.T) {
 		names.Range(func(addr netip.Addr, name HopName) { got, found = name, addr == privateHop })
 		return got, found
 	}
-	for attempt := 1; attempt < failuresToSettle; attempt++ {
-		lookup(t, names, privateHop)
-		if _, found := exported(); found || names.Pending() != 1 {
-			t.Fatalf("after %d failed lookups: exported %v, pending %d; want held back", attempt, found, names.Pending())
-		}
-		clock.Advance(failureRetry)
-	}
 	lookup(t, names, privateHop)
+	clock.Advance(settleAfter - time.Second)
+	if _, found := exported(); found || names.Pending() != 1 {
+		t.Fatalf("before settleAfter: exported %v, pending %d; want held back", found, names.Pending())
+	}
+	clock.Advance(time.Second)
 	if name, found := exported(); !found || name.Host != "" || names.Pending() != 0 {
-		t.Fatalf("after %d failed lookups: exported %v as %+v, pending %d; want it unnamed", failuresToSettle, found, name, names.Pending())
+		t.Fatalf("at settleAfter: exported %v as %+v, pending %d; want it unnamed", found, name, names.Pending())
+	}
+	if n := dns.queries(privatePTR); n != 1 {
+		t.Fatalf("settling sent %d PTR queries, want only the first", n)
 	}
 	dns.set(privatePTR, ptr("gw1.example.net."))
-	clock.Advance(failureRetry)
 	lookup(t, names, privateHop)
 	if name, _ := exported(); name.Host != "gw1.example.net" {
 		t.Fatalf("after the PTR answered: %+v", name)
@@ -225,7 +226,7 @@ func lookup(t *testing.T, names *HopNames, addr netip.Addr) HopName {
 	}
 	names.mu.Lock()
 	defer names.mu.Unlock()
-	name, _ := names.nameLocked(names.hops[addr])
+	name, _ := names.nameLocked(names.hops[addr], names.now())
 	return name
 }
 
