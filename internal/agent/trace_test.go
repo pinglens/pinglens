@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"net/netip"
+	"slices"
 	"sync"
 	"syscall"
 	"testing"
@@ -57,19 +58,42 @@ func TestHopTableReport(t *testing.T) {
 	}
 }
 
-// TestHopTableReportUnreached covers a destination that has not answered:
-// rows run to the farthest TTL with a probe outcome, as mtr shows them.
+// TestHopTableReportUnreached covers a destination that has not answered
+// while the engine keeps probing out to the maximum TTL: rows end one TTL
+// past the farthest that answered, as mtr shows them, never past the
+// farthest TTL probed.
 func TestHopTableReportUnreached(t *testing.T) {
-	table := &hopTable{}
-	cb := table.callbacks()
-	cb.OnReply(traceroute.Reply{TTL: 1, From: hop1, RTT: time.Millisecond})
-	for ttl := 2; ttl <= 5; ttl++ {
-		cb.OnTimeout(ttl)
-	}
-	cb.OnDestTTL(0)
-	report, _ := table.report(fakeNames{})
-	if len(report.Rows) != 5 || report.Rows[4].Hop != 5 || report.Rows[4].LossPct != 100 {
-		t.Fatalf("rows = %+v, want TTLs 1-5 ending in a lost hop", report.Rows)
+	for name, tc := range map[string]struct {
+		answered []int
+		probed   int
+		wantRows int
+	}{
+		// Hop 2 is silent but hop 3 answers, so hop 2 stays; the path goes
+		// silent after hop 3, as from DFW toward a blackholed address.
+		"silent after hop 3":         {[]int{1, 3}, 30, 4},
+		"nothing answers":            {nil, 30, 1},
+		"last probed TTL answered":   {[]int{1, 2, 3}, 3, 3},
+		"no outcomes past the reply": {[]int{1}, 1, 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			table := &hopTable{}
+			cb := table.callbacks()
+			for ttl := 1; ttl <= tc.probed; ttl++ {
+				if slices.Contains(tc.answered, ttl) {
+					cb.OnReply(traceroute.Reply{TTL: ttl, From: hop1, RTT: time.Millisecond})
+				} else {
+					cb.OnTimeout(ttl)
+				}
+			}
+			cb.OnDestTTL(0)
+			report, _ := table.report(fakeNames{})
+			if len(report.Rows) != tc.wantRows {
+				t.Fatalf("got %d rows %+v, want %d", len(report.Rows), report.Rows, tc.wantRows)
+			}
+			if last := report.Rows[len(report.Rows)-1]; !slices.Contains(tc.answered, last.Hop) && last.LossPct != 100 {
+				t.Fatalf("last row %+v, want the first silent TTL at 100%% loss", last)
+			}
+		})
 	}
 }
 

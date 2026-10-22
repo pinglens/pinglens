@@ -171,21 +171,27 @@ func (t *hopTable) callbacks() traceroute.Callbacks {
 }
 
 // report renders the table as mtr-style rows: TTL 1 up to the destination's
-// TTL, or up to the farthest TTL with a probe outcome while the destination
-// is unreached. A TTL that never answered has no address and 100% loss.
-// ok is false until some probe has an outcome.
+// TTL or, while the destination is unreached, up to one TTL past the farthest
+// that answered, as mtr does, so a path that goes silent ends in one lost
+// hop rather than every TTL out to the maximum the engine keeps probing. A
+// TTL that never answered has no address and 100% loss. ok is false until
+// some probe has an outcome.
 func (t *hopTable) report(names hopNamer) (protocol.TraceReport, bool) {
 	t.mu.Lock()
 	hops := t.hops
 	limit := t.destTTL
 	t.mu.Unlock()
 	if limit == 0 {
-		for ttl := len(hops) - 1; ttl > 0; ttl-- {
+		probed, answered := 0, 0
+		for ttl := 1; ttl < len(hops); ttl++ {
 			if hops[ttl].sent > 0 {
-				limit = ttl
-				break
+				probed = ttl
+			}
+			if hops[ttl].replies > 0 {
+				answered = ttl
 			}
 		}
+		limit = min(answered+1, probed)
 	}
 	if limit == 0 {
 		return protocol.TraceReport{}, false
