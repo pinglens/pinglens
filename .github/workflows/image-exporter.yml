@@ -3,6 +3,7 @@ name: Image pinglens-exporter
 # Builds only when the exporter image's inputs change, so its main tag moves
 # only for real changes to that image.
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
@@ -36,4 +37,4 @@ jobs:
     with:
       image: pinglens-exporter
       dockerfile: Dockerfile.exporter
-      push: ${{ github.event_name == 'push' }}
+      push: ${{ github.event_name != 'pull_request' }}
