@@ -2,5 +2,7 @@ apiVersion: v2
 name: pinglens-exporter
 description: Continuous per-hop ICMP trace exporter (PingLens)
 type: application
-version: 0.1.0
-appVersion: "latest"
+# Released charts get version and appVersion from the release tag; on main
+# they deploy the image built from main.
+version: 0.0.0
+appVersion: "main"

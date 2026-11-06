@@ -1,7 +1,8 @@
 image:
   repository: ghcr.io/pinglens/pinglens
-  pullPolicy: Always
-  tag: latest
+  pullPolicy: IfNotPresent
+  # Defaults to the chart's appVersion, the release the chart was built for.
+  tag: ""
 
 imagePullSecrets: []
 nameOverride: ""

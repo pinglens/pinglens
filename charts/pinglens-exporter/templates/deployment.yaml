@@ -64,10 +64,14 @@ spec:
             httpGet:
               path: /healthz
               port: http
+          # /readyz fails until traces have found their paths and the hop
+          # names are looked up (at most five minutes), so a rolling update
+          # keeps the previous pod serving names meanwhile.
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /readyz
               port: http
+            periodSeconds: 5
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}

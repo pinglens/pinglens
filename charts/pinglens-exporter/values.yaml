@@ -2,8 +2,9 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/pinglens/pinglens-exporter
-  tag: latest
-  pullPolicy: Always
+  # Defaults to the chart's appVersion, the release the chart was built for.
+  tag: ""
+  pullPolicy: IfNotPresent
 
 imagePullSecrets: []
   # - name: my-image-pull-secret
