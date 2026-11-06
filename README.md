@@ -152,7 +152,7 @@ are looked up (at most five minutes after start).
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
 | `pinglens_trace_probes_sent_total` | counter | `ttl` | Probes per hop, counted when answered or timed out |
-| `pinglens_trace_reply_rtt_seconds` | histogram | `ttl`, `hop_ip`, `dest` | Reply RTT per hop and responding address; `dest="true"` for the target's own replies |
+| `pinglens_trace_reply_rtt_seconds` | native histogram | `ttl`, `hop_ip`, `dest` | Reply RTT per hop and responding address; `dest="true"` for the target's own replies |
 | `pinglens_trace_destination_ttl` | gauge | | Hop at which the target answers, `0` while unreached |
 | `pinglens_trace_target_up` | gauge | | Whether the target's latest resolution succeeded |
 | `pinglens_trace_target_info` | gauge | `target_ip` | Address the target resolves to |
@@ -161,6 +161,15 @@ are looked up (at most five minutes after start).
 Every series except `pinglens_trace_hop_info` also carries `target` and the
 target's labels. `ttl` is zero-padded (`01`), so it sorts in hop order. Loss
 per hop is `1 - replies / probes sent` over any window.
+
+The RTT histogram is a [native histogram](https://prometheus.io/docs/specs/native_histograms/)
+(8 buckets per doubling, each about 9% wide). Scraped natively it is one
+series per hop and responding address that carries the whole latency
+distribution; enable it with `scrape_native_histograms: true` in the scrape
+job (Prometheus 3.8 or later), or `serviceMonitor.scrapeNativeHistograms` in
+the chart (Prometheus Operator 0.88 or later). Scraped in the text format it
+is `_count`, `_sum` and a single `+Inf` bucket: averages and loss, without
+the distribution.
 
 The [chart](charts/pinglens-exporter/values.yaml) renders `config.yml` from
 groups of targets, adding `ping_group` and `endpoint_fullname` labels:
@@ -186,7 +195,9 @@ The [mixin](mixin/) builds the **PingLens Trace** dashboard: a hop table for
 the selected range, the responding address per hop over time, destination
 latency and loss, latency and loss per hop, and the destination RTT
 distribution. It selects targets by the chart's `group_title` and
-`endpoint_fullname` labels.
+`endpoint_fullname` labels. The percentile columns and the RTT distribution
+come from native histograms; every other panel works with either scrape
+format.
 
 ```jsonnet
 // With jsonnet-bundler: jb install github.com/pinglens/pinglens/mixin@main

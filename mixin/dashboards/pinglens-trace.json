@@ -358,7 +358,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "label_replace(label_replace(label_join(sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) > 0, \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
+          "expr": "label_replace(label_replace(label_join((sum by (ttl, hop_ip) (histogram_count(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) or sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) > 0, \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "table"
@@ -369,7 +369,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "label_replace(label_replace(label_join((clamp(1 - sum by (ttl) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) / sum by (ttl) (increase(pinglens_trace_probes_sent_total{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])), 0, 1) * on (ttl) group_right () (0 * sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) + 1)) and on (ttl, hop_ip) (sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) > 0), \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
+          "expr": "label_replace(label_replace(label_join((clamp(1 - (sum by (ttl) (histogram_count(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) or sum by (ttl) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) / sum by (ttl) (increase(pinglens_trace_probes_sent_total{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])), 0, 1) * on (ttl) group_right () (0 * (sum by (ttl, hop_ip) (histogram_count(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) or sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) + 1)) and on (ttl, hop_ip) ((sum by (ttl, hop_ip) (histogram_count(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) or sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) > 0), \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "table"
@@ -380,7 +380,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "label_replace(label_replace(label_join((sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_sum{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) / sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) and on (ttl, hop_ip) (sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) > 0), \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
+          "expr": "label_replace(label_replace(label_join(((sum by (ttl, hop_ip) (histogram_sum(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) or sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_sum{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) / (sum by (ttl, hop_ip) (histogram_count(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) or sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])))) and on (ttl, hop_ip) ((sum by (ttl, hop_ip) (histogram_count(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) or sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) > 0), \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "table"
@@ -391,7 +391,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "label_replace(label_replace(label_join(histogram_quantile(0.5, sum by (ttl, hop_ip, le) (increase(pinglens_trace_reply_rtt_seconds_bucket{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) and on (ttl, hop_ip) (sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) > 0), \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
+          "expr": "label_replace(label_replace(label_join(histogram_quantile(0.5, sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) and on (ttl, hop_ip) ((sum by (ttl, hop_ip) (histogram_count(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) or sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) > 0), \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "table"
@@ -402,7 +402,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "label_replace(label_replace(label_join(histogram_quantile(0.95, sum by (ttl, hop_ip, le) (increase(pinglens_trace_reply_rtt_seconds_bucket{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) and on (ttl, hop_ip) (sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) > 0), \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
+          "expr": "label_replace(label_replace(label_join(histogram_quantile(0.95, sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) and on (ttl, hop_ip) ((sum by (ttl, hop_ip) (histogram_count(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) or sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) > 0), \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "table"
@@ -413,7 +413,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "label_replace(label_replace(label_join((sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_sum{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[2m])) / sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[2m]))) and on (ttl, hop_ip) (sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[2m])) > 0), \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
+          "expr": "label_replace(label_replace(label_join(((sum by (ttl, hop_ip) (histogram_sum(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[2m]))) or sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_sum{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[2m]))) / (sum by (ttl, hop_ip) (histogram_count(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[2m]))) or sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[2m])))) and on (ttl, hop_ip) ((sum by (ttl, hop_ip) (histogram_count(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[2m]))) or sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[2m]))) > 0), \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "table"
@@ -424,7 +424,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "label_join(group by (ttl, hop_ip, hop_host, hop_asn, hop_as_name) ((sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) > 0) * on (hop_ip) group_left (hop_host, hop_asn, hop_as_name) group by (hop_ip, hop_host, hop_asn, hop_as_name) (topk by (hop_ip) (1, group by (hop_ip, hop_host, hop_asn, hop_as_name) (pinglens_trace_hop_info{cluster=\"$cluster\", hop_host!=\"\"}) * 2 or group by (hop_ip, hop_host, hop_asn, hop_as_name) (pinglens_trace_hop_info{cluster=\"$cluster\"}))) or on (ttl, hop_ip) (sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) > 0)), \"hop\", \" \", \"ttl\", \"hop_ip\")",
+          "expr": "label_join(group by (ttl, hop_ip, hop_host, hop_asn, hop_as_name) (((sum by (ttl, hop_ip) (histogram_count(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) or sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) > 0) * on (hop_ip) group_left (hop_host, hop_asn, hop_as_name) group by (hop_ip, hop_host, hop_asn, hop_as_name) (topk by (hop_ip) (1, group by (hop_ip, hop_host, hop_asn, hop_as_name) (pinglens_trace_hop_info{cluster=\"$cluster\", hop_host!=\"\"}) * 2 or group by (hop_ip, hop_host, hop_asn, hop_as_name) (pinglens_trace_hop_info{cluster=\"$cluster\"}))) or on (ttl, hop_ip) ((sum by (ttl, hop_ip) (histogram_count(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) or sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) > 0)), \"hop\", \" \", \"ttl\", \"hop_ip\")",
           "range": false,
           "instant": true,
           "format": "table"
@@ -580,7 +580,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "label_replace((clamp(1 - sum by (ttl) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])) / sum by (ttl) (increase(pinglens_trace_probes_sent_total{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])), 0, 1) * on (ttl) group_right () ((sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])) > 0) * 0 + 1)) * on (hop_ip) group_left (hop_host) group by (hop_ip, hop_host) (topk by (hop_ip) (1, group by (hop_ip, hop_host) (pinglens_trace_hop_info{cluster=\"$cluster\", hop_host!=\"\"}) * 2 or group by (hop_ip, hop_host) (pinglens_trace_hop_info{cluster=\"$cluster\"}))) or on (ttl, hop_ip) (clamp(1 - sum by (ttl) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])) / sum by (ttl) (increase(pinglens_trace_probes_sent_total{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])), 0, 1) * on (ttl) group_right () ((sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])) > 0) * 0 + 1)), \"_hop\", \"$1\", \"ttl\", \"(.*)\")",
+          "expr": "label_replace((clamp(1 - (sum by (ttl) (histogram_count(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))) or sum by (ttl) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))) / sum by (ttl) (increase(pinglens_trace_probes_sent_total{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])), 0, 1) * on (ttl) group_right () (((sum by (ttl, hop_ip) (histogram_count(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))) or sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))) > 0) * 0 + 1)) * on (hop_ip) group_left (hop_host) group by (hop_ip, hop_host) (topk by (hop_ip) (1, group by (hop_ip, hop_host) (pinglens_trace_hop_info{cluster=\"$cluster\", hop_host!=\"\"}) * 2 or group by (hop_ip, hop_host) (pinglens_trace_hop_info{cluster=\"$cluster\"}))) or on (ttl, hop_ip) (clamp(1 - (sum by (ttl) (histogram_count(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))) or sum by (ttl) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))) / sum by (ttl) (increase(pinglens_trace_probes_sent_total{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])), 0, 1) * on (ttl) group_right () (((sum by (ttl, hop_ip) (histogram_count(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))) or sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))) > 0) * 0 + 1)), \"_hop\", \"$1\", \"ttl\", \"(.*)\")",
           "range": true,
           "instant": false,
           "legendFormat": "{{ttl}} {{hop_ip}} {{hop_host}}"
@@ -686,7 +686,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(pinglens_trace_reply_rtt_seconds_sum{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval])) / sum(rate(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval]))",
+          "expr": "(sum (histogram_sum(rate(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval]))) or sum (rate(pinglens_trace_reply_rtt_seconds_sum{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval]))) / (sum (histogram_count(rate(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval]))) or sum (rate(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval])))",
           "range": true,
           "instant": false,
           "legendFormat": "latency"
@@ -697,7 +697,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "1 - sum(rate(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval])) / sum(rate(pinglens_trace_probes_sent_total{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]) and on (ttl) (sum by (ttl) (rate(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval])) > 0))",
+          "expr": "1 - (sum (histogram_count(rate(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval]))) or sum (rate(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval]))) / sum(rate(pinglens_trace_probes_sent_total{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]) and on (ttl) ((sum by (ttl) (histogram_count(rate(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval]))) or sum by (ttl) (rate(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval]))) > 0))",
           "range": true,
           "instant": false,
           "legendFormat": "loss"
@@ -708,7 +708,7 @@
       "id": 4,
       "type": "timeseries",
       "title": "Latency by hop",
-      "description": "Mean RTT per TTL and responding address. Click a legend entry to show one hop, Ctrl/Cmd-click to toggle more. Click a point to focus the dashboard on ±5 minutes around it.",
+      "description": "Mean RTT per TTL and responding address. Click a legend entry to show one hop, Ctrl/Cmd-click to toggle more. Click a point to focus the dashboard on \u00b15 minutes around it.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -743,7 +743,7 @@
           },
           "links": [
             {
-              "title": "Focus ±5m here",
+              "title": "Focus \u00b15m here",
               "url": "/d/pinglens-trace/pinglens-trace?${__all_variables}&time=${__value.time}&time.window=600000"
             }
           ]
@@ -775,7 +775,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (ttl, hop_ip) (rate(pinglens_trace_reply_rtt_seconds_sum{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])) / sum by (ttl, hop_ip) (rate(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))",
+          "expr": "(sum by (ttl, hop_ip) (histogram_sum(rate(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))) or sum by (ttl, hop_ip) (rate(pinglens_trace_reply_rtt_seconds_sum{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))) / (sum by (ttl, hop_ip) (histogram_count(rate(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))) or sum by (ttl, hop_ip) (rate(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])))",
           "range": true,
           "instant": false,
           "legendFormat": "{{ttl}} {{hop_ip}}"
@@ -823,7 +823,7 @@
           "max": 1,
           "links": [
             {
-              "title": "Focus ±5m here",
+              "title": "Focus \u00b15m here",
               "url": "/d/pinglens-trace/pinglens-trace?${__all_variables}&time=${__value.time}&time.window=600000"
             }
           ]
@@ -854,7 +854,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(1 - sum by (ttl) (rate(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])) / sum by (ttl) (rate(pinglens_trace_probes_sent_total{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))) and on (ttl) (sum by (ttl) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) > 0)",
+          "expr": "(1 - (sum by (ttl) (histogram_count(rate(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))) or sum by (ttl) (rate(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))) / sum by (ttl) (rate(pinglens_trace_probes_sent_total{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))) and on (ttl) ((sum by (ttl) (histogram_count(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) or sum by (ttl) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) > 0)",
           "range": true,
           "instant": false,
           "legendFormat": "{{ttl}}"
@@ -932,7 +932,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (le) (increase(pinglens_trace_reply_rtt_seconds_bucket{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval]))",
+          "expr": "sum(increase(pinglens_trace_reply_rtt_seconds{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval]))",
           "range": true,
           "instant": false,
           "legendFormat": "{{le}}",

@@ -3,6 +3,7 @@ package exporter
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -48,8 +49,9 @@ targets:
 		t.Fatalf("sent = %v, want 3", got)
 	}
 	rtt := find(t, families, metricRTT, map[string]string{"target": "1.1.1.1", "ttl": "01", "hop_ip": "10.0.0.1", "dest": "false"})
-	if h := rtt.GetHistogram(); h.GetSampleCount() != 1 || bucket(h, .0025) != 0 || bucket(h, .005) != 1 || bucket(h, 1) != 1 {
-		t.Fatalf("histogram = %v", h)
+	if h := rtt.GetHistogram(); h.GetSampleCount() != 1 || h.GetSampleSum() != .003 || h.GetSchema() != rttSchema ||
+		len(h.GetBucket()) != 0 || !maps.Equal(nativeBuckets(h), map[int]int64{rttBucket(.003): 1}) {
+		t.Fatalf("histogram = %v, want one native observation of 3ms", h)
 	}
 	hop := find(t, families, metricHop, map[string]string{"hop_ip": "10.0.0.1"})
 	if got := labels(hop); len(got) != 4 || got["hop_host"] != "r1.example.net" || got["hop_asn"] != "AS64500" {
@@ -431,11 +433,43 @@ func labels(m *dto.Metric) map[string]string {
 	return out
 }
 
-func bucket(h *dto.Histogram, bound float64) uint64 {
-	for _, b := range h.GetBucket() {
-		if b.GetUpperBound() == bound {
-			return b.GetCumulativeCount()
+// nativeBuckets decodes a native histogram's positive buckets to counts per
+// bucket index.
+func nativeBuckets(h *dto.Histogram) map[int]int64 {
+	out := map[int]int64{}
+	index, delta, count := 0, 0, int64(0)
+	for _, span := range h.GetPositiveSpan() {
+		index += int(span.GetOffset())
+		for range span.GetLength() {
+			count += h.GetPositiveDelta()[delta]
+			out[index] = count
+			index++
+			delta++
 		}
 	}
-	return 0
+	return out
+}
+
+// TestRTTBucketMatchesClientGolang checks the exporter's bucket index for
+// RTTs, including exact bucket boundaries, against client_golang's own native
+// histogram at the same schema.
+func TestRTTBucketMatchesClientGolang(t *testing.T) {
+	values := []float64{50e-6, .00031, .001, .0025, .003, .0123, .25, .5, 1, 1.9, 59}
+	for i := range rttBounds {
+		values = append(values, rttBounds[i]*.001, rttBounds[i]) // boundaries
+	}
+	for _, v := range values {
+		ref := prometheus.NewHistogram(prometheus.HistogramOpts{Name: "ref", NativeHistogramBucketFactor: 1.1})
+		ref.Observe(v)
+		var m dto.Metric
+		if err := ref.Write(&m); err != nil {
+			t.Fatal(err)
+		}
+		if schema := m.GetHistogram().GetSchema(); schema != rttSchema {
+			t.Fatalf("reference histogram schema %d, want %d", schema, rttSchema)
+		}
+		if want := (map[int]int64{rttBucket(v): 1}); !maps.Equal(nativeBuckets(m.GetHistogram()), want) {
+			t.Fatalf("rttBucket(%g) = %d, client_golang uses %v", v, rttBucket(v), nativeBuckets(m.GetHistogram()))
+		}
+	}
 }

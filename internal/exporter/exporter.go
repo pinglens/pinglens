@@ -282,10 +282,15 @@ type hopKey struct {
 	dest bool
 }
 
+// hopSeries is one native RTT histogram: observation counts per bucket index
+// (see rttBucket), RTTs at or below the zero threshold, and the total count
+// and sum.
 type hopSeries struct {
-	buckets [len(rttBuckets)]uint64
+	buckets map[int]int64
+	zero    uint64
 	count   uint64
 	sum     float64
+	created time.Time
 	last    time.Time
 }
 
@@ -320,14 +325,13 @@ func (s *targetState) callbacks(names HopNamer, now func() time.Time) traceroute
 			s.countSentLocked(r.TTL, at)
 			series := s.hops[key]
 			if series == nil {
-				series = &hopSeries{}
+				series = &hopSeries{buckets: map[int]int64{}, created: at}
 				s.hops[key] = series
 			}
-			for i, bound := range rttBuckets {
-				if seconds <= bound {
-					series.buckets[i]++
-					break
-				}
+			if seconds <= prometheus.DefNativeHistogramZeroThreshold {
+				series.zero++
+			} else {
+				series.buckets[rttBucket(seconds)]++
 			}
 			series.count++
 			series.sum += seconds

@@ -58,6 +58,11 @@ serviceMonitor:
   # Extra labels, e.g. the release label the Prometheus selects on.
   labels: {}
   interval: 30s
+  # The RTT histograms are native histograms: scraped natively they are one
+  # series per hop with the full latency distribution, otherwise only their
+  # count and sum. Enabling this sets the ServiceMonitor's
+  # scrapeNativeHistograms, which needs Prometheus Operator 0.88 or later.
+  scrapeNativeHistograms: false
   relabelings:
     - action: labeldrop
       regex: pod

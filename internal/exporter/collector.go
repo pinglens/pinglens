@@ -3,8 +3,10 @@ package exporter
 import (
 	"fmt"
 	"maps"
+	"math"
 	"net/netip"
 	"slices"
+	"sort"
 	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -12,8 +14,26 @@ import (
 	"github.com/pinglens/pinglens/internal/traceroute"
 )
 
-// rttBuckets are the RTT histogram's upper bounds in seconds.
-var rttBuckets = [...]float64{.001, .0025, .005, .01, .025, .05, .1, .2, .4, 1}
+// The RTT histogram is a native histogram with schema rttSchema: 2^3 = 8
+// buckets per doubling, each about 9% wide. RTTs from 50µs to a 60s timeout
+// fit in Mimir's default limit of 160 buckets.
+const rttSchema = 3
+
+// rttBounds are the bucket boundaries within one doubling, as fractions of
+// its upper end: 2^(i/8 - 1) for i in 0..7. They are client_golang's
+// constants for schema 3, so values on a boundary land in the same bucket as
+// in client_golang and Prometheus.
+var rttBounds = [1 << rttSchema]float64{
+	0.5, 0.5452538663326288, 0.5946035575013605, 0.6484197773255048,
+	0.7071067811865475, 0.7711054127039704, 0.8408964152537144, 0.9170040432046711,
+}
+
+// rttBucket returns the index of the native bucket holding a positive RTT in
+// seconds: bucket i holds values in (2^((i-1)/8), 2^(i/8)].
+func rttBucket(seconds float64) int {
+	frac, exp := math.Frexp(seconds)
+	return sort.SearchFloat64s(rttBounds[:], frac) + (exp-1)*len(rttBounds)
+}
 
 const (
 	metricSent    = "pinglens_trace_probes_sent_total"
@@ -85,13 +105,8 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 			}
 		}
 		for _, hop := range t.hops {
-			buckets := make(map[float64]uint64, len(rttBuckets))
-			var cumulative uint64
-			for i, bound := range rttBuckets {
-				cumulative += hop.series.buckets[i]
-				buckets[bound] = cumulative
-			}
-			send(prometheus.NewConstHistogram(rttDesc, hop.series.count, hop.series.sum, buckets,
+			send(prometheus.NewConstNativeHistogram(rttDesc, hop.series.count, hop.series.sum, hop.series.buckets, nil,
+				hop.series.zero, rttSchema, prometheus.DefNativeHistogramZeroThreshold, hop.series.created,
 				withValues(ttlLabel(hop.key.ttl), hop.key.ip.String(), strconv.FormatBool(hop.key.dest))...))
 		}
 		send(prometheus.NewConstMetric(destDesc, prometheus.GaugeValue, float64(t.destTTL), values...))
@@ -139,7 +154,9 @@ func (s *targetState) snapshot() targetSnapshot {
 		hops:    make([]hopSnapshot, 0, len(s.hops)),
 	}
 	for key, series := range s.hops {
-		snap.hops = append(snap.hops, hopSnapshot{key: key, series: *series})
+		copied := *series
+		copied.buckets = maps.Clone(series.buckets)
+		snap.hops = append(snap.hops, hopSnapshot{key: key, series: copied})
 	}
 	return snap
 }

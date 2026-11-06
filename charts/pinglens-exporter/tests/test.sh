@@ -58,6 +58,12 @@ helm template pinglens-exporter "$chart_dir" -f "$tests_dir/values-targets.yaml"
   --show-only templates/servicemonitor.yaml > "$work_dir/servicemonitor.yaml"
 grep -Eq '^kind: ServiceMonitor$' "$work_dir/servicemonitor.yaml" || fail "ServiceMonitor not rendered"
 grep -Eq '^    release: x$' "$work_dir/servicemonitor.yaml" || fail "ServiceMonitor labels not merged"
+grep -q 'scrapeNativeHistograms' "$work_dir/servicemonitor.yaml" &&
+  fail "ServiceMonitor sets scrapeNativeHistograms by default"
+helm template pinglens-exporter "$chart_dir" -f "$tests_dir/values-targets.yaml" \
+  --set serviceMonitor.enabled=true,serviceMonitor.scrapeNativeHistograms=true \
+  --show-only templates/servicemonitor.yaml | grep -Eq '^  scrapeNativeHistograms: true$' ||
+  fail "ServiceMonitor does not set scrapeNativeHistograms when enabled"
 
 # hosts ARGS...: the target hosts rendered with the test values plus ARGS.
 hosts() {

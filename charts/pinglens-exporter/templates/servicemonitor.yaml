@@ -9,6 +9,9 @@ metadata:
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
+  {{- if .Values.serviceMonitor.scrapeNativeHistograms }}
+  scrapeNativeHistograms: true
+  {{- end }}
   selector:
     matchLabels:
       {{- include "pinglens_exporter.selectorLabels" . | nindent 6 }}
