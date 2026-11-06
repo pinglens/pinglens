@@ -1,0 +1,39 @@
+name: Image pinglens-exporter
+
+# Builds only when the exporter image's inputs change, so its main tag moves
+# only for real changes to that image.
+on:
+  push:
+    branches: [main]
+    paths:
+      - cmd/pinglens_exporter/**
+      - internal/exporter/**
+      - internal/target/**
+      - internal/traceroute/**
+      - go.mod
+      - go.sum
+      - Dockerfile.exporter
+      - .github/workflows/image.yml
+      - .github/workflows/image-exporter.yml
+  pull_request:
+    paths:
+      - cmd/pinglens_exporter/**
+      - internal/exporter/**
+      - internal/target/**
+      - internal/traceroute/**
+      - go.mod
+      - go.sum
+      - Dockerfile.exporter
+      - .github/workflows/image.yml
+      - .github/workflows/image-exporter.yml
+
+jobs:
+  image:
+    uses: ./.github/workflows/image.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      image: pinglens-exporter
+      dockerfile: Dockerfile.exporter
+      push: ${{ github.event_name == 'push' }}

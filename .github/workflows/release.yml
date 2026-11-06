@@ -1,0 +1,91 @@
+name: Release
+
+# Pushing a tag vX.Y.Z (or vX.Y.Z-rc.N) publishes that release: both images,
+# both charts with version X.Y.Z and appVersion vX.Y.Z, and a GitHub release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the tag is a semantic version
+        run: |
+          echo "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' || {
+            echo "tag $GITHUB_REF_NAME is not vMAJOR.MINOR.PATCH[-PRERELEASE]"
+            exit 1
+          }
+
+  ci:
+    needs: tag
+    uses: ./.github/workflows/ci.yml
+
+  images:
+    needs: ci
+    strategy:
+      matrix:
+        include:
+          - image: pinglens
+            dockerfile: Dockerfile
+          - image: pinglens-exporter
+            dockerfile: Dockerfile.exporter
+    uses: ./.github/workflows/image.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      image: ${{ matrix.image }}
+      dockerfile: ${{ matrix.dockerfile }}
+      push: true
+
+  charts:
+    needs: images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Package
+        run: |
+          helm repo add valkey https://valkey.io/valkey-helm/
+          helm dependency build charts/pinglens
+          for chart in pinglens pinglens-exporter; do
+            helm package "charts/$chart" --version "${GITHUB_REF_NAME#v}" --app-version "$GITHUB_REF_NAME" -d dist
+          done
+      - name: Push to ghcr.io
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          for package in dist/*.tgz; do
+            helm push "$package" "oci://ghcr.io/$GITHUB_REPOSITORY_OWNER/charts"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: dist/
+
+  release:
+    needs: charts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: dist
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease=--prerelease ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --generate-notes $prerelease

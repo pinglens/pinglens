@@ -1,0 +1,47 @@
+name: Image pinglens
+
+# Builds only when the agent and coordinator image's inputs change, so its
+# main tag moves only for real changes to that image.
+on:
+  push:
+    branches: [main]
+    paths:
+      - cmd/pinglens/**
+      - internal/agent/**
+      - internal/coordinator/**
+      - internal/ping/**
+      - internal/protocol/**
+      - internal/target/**
+      - internal/traceroute/**
+      - web/**
+      - go.mod
+      - go.sum
+      - Dockerfile
+      - .github/workflows/image.yml
+      - .github/workflows/image-pinglens.yml
+  pull_request:
+    paths:
+      - cmd/pinglens/**
+      - internal/agent/**
+      - internal/coordinator/**
+      - internal/ping/**
+      - internal/protocol/**
+      - internal/target/**
+      - internal/traceroute/**
+      - web/**
+      - go.mod
+      - go.sum
+      - Dockerfile
+      - .github/workflows/image.yml
+      - .github/workflows/image-pinglens.yml
+
+jobs:
+  image:
+    uses: ./.github/workflows/image.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      image: pinglens
+      dockerfile: Dockerfile
+      push: ${{ github.event_name == 'push' }}
