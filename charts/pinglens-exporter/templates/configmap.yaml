@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pinglens_exporter.fullname" . }}
+  labels:
+    {{- include "pinglens_exporter.labels" . | nindent 4 }}
+data:
+  config.yml: |
+{{ toYaml .Values.config | indent 4 }}
+    targets:
+    {{- $count := 0 }}
+    {{- range $groupName, $groupData := .Values.targets }}
+      {{- range $targetItem := $groupData.targets }}
+        {{- /* A target is a host string or a single-key map of host to labels. */}}
+        {{- $host := "" }}
+        {{- $targetLabels := dict }}
+        {{- if kindIs "string" $targetItem }}
+          {{- $host = $targetItem }}
+        {{- else if kindIs "map" $targetItem }}
+          {{- range $k, $v := $targetItem }}
+            {{- $host = $k }}
+            {{- $targetLabels = $v | default dict }}
+          {{- end }}
+        {{- end }}
+        {{- /* merge keeps the first value set: ping_group, then target, then group labels. */}}
+        {{- $labels := merge (dict "ping_group" $groupName) (deepCopy $targetLabels) (deepCopy ($groupData.labels | default dict)) }}
+        {{- $fullName := $host }}
+        {{- with $labels.endpoint_name }}
+          {{- $fullName = printf "%s %s" . $host }}
+        {{- end }}
+        {{- $_ := set $labels "endpoint_fullname" $fullName }}
+        {{- include "pinglens_exporter.target" (dict "host" $host "labels" $labels) | nindent 6 }}
+        {{- $count = add1 $count }}
+      {{- end }}
+    {{- end }}
+    {{- if eq $count 0 }}
+      {{- fail "pinglens-exporter: no targets configured" }}
+    {{- end }}

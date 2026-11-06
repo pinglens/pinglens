@@ -1,0 +1,17 @@
+targets:
+  default:
+    labels:
+      public: "true"
+      group_title: Internet Targets
+    targets:
+      - 1.1.1.1:
+          endpoint_name: Cloudflare DNS
+      - 8.8.8.8
+  customer:
+    labels:
+      group_title: Customer
+      ping_alerts: "false"
+    targets:
+      - 192.0.2.10:
+          endpoint_name: SITE-D1
+          asn: 64496

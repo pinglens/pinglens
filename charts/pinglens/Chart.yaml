@@ -1,0 +1,11 @@
+apiVersion: v2
+name: pinglens
+description: PingLens regional ping and MTR-style path testing service
+version: 0.5.0
+appVersion: "0.4.0"
+type: application
+dependencies:
+  - name: valkey
+    version: "0.9.*"
+    repository: https://valkey.io/valkey-helm/
+    condition: valkey.enabled,coordinator.enabled
