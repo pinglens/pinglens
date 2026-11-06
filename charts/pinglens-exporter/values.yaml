@@ -109,3 +109,9 @@ targets: {}
   #     - 1.1.1.1
   #     - 8.8.8.8:
   #         endpoint_name: Google DNS
+
+# Targets to leave out. A target is skipped when it matches every label of
+# any one entry; host and endpoint_fullname can be matched like the other
+# labels. Exporters in several sites can share one target list this way and
+# each skip its own site, e.g. [{target_region: DFW}].
+excludeTargets: []

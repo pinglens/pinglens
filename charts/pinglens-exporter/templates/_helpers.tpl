@@ -75,3 +75,28 @@ strings, so values are quoted. Takes a dict with "host" and "labels".
   {{ $name }}: {{ $value | toString | quote }}
 {{- end }}
 {{- end }}
+
+{{/*
+"true" when the target matches an excludeTargets entry: the target has every
+label the entry names, host included, with the entry's value. Takes a dict
+with "host", "labels" and "rules".
+*/}}
+{{- define "pinglens_exporter.excluded" -}}
+{{- $target := merge (dict "host" .host) .labels }}
+{{- $excluded := false }}
+{{- range $rule := .rules }}
+  {{- if not $rule }}
+    {{- fail "pinglens-exporter: excludeTargets entries need at least one label" }}
+  {{- end }}
+  {{- $match := true }}
+  {{- range $name, $value := $rule }}
+    {{- if or (not (hasKey $target $name)) (ne (toString (get $target $name)) (toString $value)) }}
+      {{- $match = false }}
+    {{- end }}
+  {{- end }}
+  {{- if $match }}
+    {{- $excluded = true }}
+  {{- end }}
+{{- end }}
+{{- if $excluded }}true{{ end }}
+{{- end }}

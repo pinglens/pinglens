@@ -29,8 +29,10 @@ data:
           {{- $fullName = printf "%s %s" . $host }}
         {{- end }}
         {{- $_ := set $labels "endpoint_fullname" $fullName }}
+        {{- if not (include "pinglens_exporter.excluded" (dict "host" $host "labels" $labels "rules" $.Values.excludeTargets)) }}
         {{- include "pinglens_exporter.target" (dict "host" $host "labels" $labels) | nindent 6 }}
         {{- $count = add1 $count }}
+        {{- end }}
       {{- end }}
     {{- end }}
     {{- if eq $count 0 }}

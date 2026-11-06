@@ -59,6 +59,25 @@ helm template pinglens-exporter "$chart_dir" -f "$tests_dir/values-targets.yaml"
 grep -Eq '^kind: ServiceMonitor$' "$work_dir/servicemonitor.yaml" || fail "ServiceMonitor not rendered"
 grep -Eq '^    release: x$' "$work_dir/servicemonitor.yaml" || fail "ServiceMonitor labels not merged"
 
+# hosts ARGS...: the target hosts rendered with the test values plus ARGS.
+hosts() {
+  helm template pinglens-exporter "$chart_dir" -f "$tests_dir/values-targets.yaml" \
+    --show-only templates/configmap.yaml "$@" |
+    sed -nE 's/^ +- host: "(.*)"$/\1/p' | sort | tr '\n' ' '
+}
+[ "$(hosts --set-json 'excludeTargets=[{"ping_group":"customer"}]')" = "1.1.1.1 8.8.8.8 " ] ||
+  fail "excludeTargets did not skip a group by label"
+[ "$(hosts --set-json 'excludeTargets=[{"ping_group":"customer","asn":"1"}]')" = "1.1.1.1 192.0.2.10 8.8.8.8 " ] ||
+  fail "excludeTargets skipped a target matching only some labels"
+[ "$(hosts --set-json 'excludeTargets=[{"host":"8.8.8.8"},{"endpoint_name":"Cloudflare DNS"}]')" = "192.0.2.10 " ] ||
+  fail "excludeTargets did not skip by host or by any entry"
+render_fails "pinglens-exporter: no targets configured" -f "$tests_dir/values-targets.yaml" \
+  --set-json 'excludeTargets=[{"group_title":"Customer"},{"public":"true"}]' ||
+  fail "rendered with every target excluded"
+render_fails "excludeTargets entries need at least one label" -f "$tests_dir/values-targets.yaml" \
+  --set-json 'excludeTargets=[{}]' ||
+  fail "rendered with an empty excludeTargets entry"
+
 if [ -n "$output" ]; then
   cat "$targets" > "$output"
 fi
