@@ -14,6 +14,10 @@ PingLens measures network paths from many locations at once.
 Both trace with the same in-process ICMP engine and support IPv4 and IPv6
 (the exporter traces IPv4).
 
+![PingLens test results: ping statistics and the live hop table from one region](docs/images/pinglens.png)
+
+![PingLens Trace dashboard: hop table, responding address per hop over time, and destination latency and loss](docs/images/pinglens-trace-dashboard.png)
+
 | Artifact | Location |
 |---|---|
 | PingLens image | `ghcr.io/pinglens/pinglens` |
