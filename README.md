@@ -14,10 +14,6 @@ PingLens measures network paths from many locations at once.
 Both trace with the same in-process ICMP engine and support IPv4 and IPv6
 (the exporter traces IPv4).
 
-![PingLens test results: ping statistics and the live hop table from one region](docs/images/pinglens.png)
-
-![PingLens Trace dashboard: hop table, responding address per hop over time, and destination latency and loss](docs/images/pinglens-trace-dashboard.png)
-
 | Artifact | Location |
 |---|---|
 | PingLens image | `ghcr.io/pinglens/pinglens` |
@@ -30,6 +26,8 @@ release (`v0.1.0`), its minor line (`v0.1`) and `latest`; `main` tracks the
 main branch.
 
 ## PingLens
+
+![PingLens test results: ping statistics and the live hop table from one region](docs/images/pinglens.png)
 
 PingLens runs as a coordinator and one agent per region:
 
@@ -119,6 +117,8 @@ Agent:
 Both read `PINGLENS_LOG_LEVEL` (`debug`, `info`, `warn`, `error`).
 
 ## pinglens-exporter
+
+![PingLens Trace dashboard: hop table, responding address per hop over time, and destination latency and loss](docs/images/pinglens-trace-dashboard.png)
 
 ```yaml
 # config.yml
