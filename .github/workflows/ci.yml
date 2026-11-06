@@ -48,3 +48,14 @@ jobs:
           helm lint --strict charts/pinglens
       - name: Test pinglens-exporter
         run: sh charts/pinglens-exporter/tests/test.sh
+
+  mixin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install jsonnet
+        run: go install github.com/google/go-jsonnet/cmd/jsonnet@v0.21.0 github.com/google/go-jsonnet/cmd/jsonnetfmt@v0.21.0
+      - run: sh mixin/test.sh

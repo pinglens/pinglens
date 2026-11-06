@@ -1,0 +1,1011 @@
+{
+  "id": null,
+  "uid": "pinglens-trace",
+  "title": "PingLens Trace",
+  "description": "Continuous trace of one target: per-hop loss, latency and responding addresses from pinglens-exporter, which probes every hop every 2.5 seconds.",
+  "tags": [
+    "pinglens"
+  ],
+  "timezone": "utc",
+  "editable": false,
+  "graphTooltip": 1,
+  "schemaVersion": 41,
+  "version": 1,
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "fiscalYearStartMonth": 0,
+  "liveNow": false,
+  "weekStart": "",
+  "annotations": {
+    "list": []
+  },
+  "links": [],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "prometheus",
+        "regex": "",
+        "current": {},
+        "options": [],
+        "refresh": 1,
+        "hide": 0
+      },
+      {
+        "name": "cluster",
+        "label": "Cluster",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(pinglens_trace_target_info, cluster)",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(pinglens_trace_target_info, cluster)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "current": {},
+        "options": [],
+        "includeAll": false,
+        "multi": false,
+        "hide": 0
+      },
+      {
+        "name": "group",
+        "label": "Group",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(pinglens_trace_target_info{cluster=\"$cluster\"}, group_title)",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(pinglens_trace_target_info{cluster=\"$cluster\"}, group_title)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "current": {},
+        "options": [],
+        "includeAll": false,
+        "multi": false,
+        "hide": 0
+      },
+      {
+        "name": "target",
+        "label": "Target",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(pinglens_trace_target_info{cluster=\"$cluster\", group_title=\"$group\"}, endpoint_fullname)",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(pinglens_trace_target_info{cluster=\"$cluster\", group_title=\"$group\"}, endpoint_fullname)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "current": {},
+        "options": [],
+        "includeAll": false,
+        "multi": false,
+        "hide": 0
+      },
+      {
+        "name": "ttl",
+        "label": "TTL",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(pinglens_trace_probes_sent_total{cluster=\"$cluster\", endpoint_fullname=\"$target\"}, ttl)",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(pinglens_trace_probes_sent_total{cluster=\"$cluster\", endpoint_fullname=\"$target\"}, ttl)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "includeAll": true,
+        "multi": true,
+        "hide": 0,
+        "allValue": ".*"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Hops (selected time range)",
+      "description": "One row per TTL and responding address over the selected range. Loss is the TTL's share of probes without a reply; a router that rate-limits its ICMP errors shows loss that does not carry on to later hops. Last 2m is the mean RTT of the last two minutes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 12
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Loss"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 0.02
+                    },
+                    {
+                      "color": "red",
+                      "value": 0.1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Replies"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p50"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p95"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last 2m"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "TTL"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 50
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Hop IP"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ASN"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "label_replace(label_replace(label_join(sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) > 0, \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "label_replace(label_replace(label_join((clamp(1 - sum by (ttl) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) / sum by (ttl) (increase(pinglens_trace_probes_sent_total{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])), 0, 1) * on (ttl) group_right () (0 * sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) + 1)) and on (ttl, hop_ip) (sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) > 0), \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "label_replace(label_replace(label_join((sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_sum{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) / sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) and on (ttl, hop_ip) (sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) > 0), \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "label_replace(label_replace(label_join(histogram_quantile(0.5, sum by (ttl, hop_ip, le) (increase(pinglens_trace_reply_rtt_seconds_bucket{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) and on (ttl, hop_ip) (sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) > 0), \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "label_replace(label_replace(label_join(histogram_quantile(0.95, sum by (ttl, hop_ip, le) (increase(pinglens_trace_reply_rtt_seconds_bucket{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range]))) and on (ttl, hop_ip) (sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) > 0), \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "label_replace(label_replace(label_join((sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_sum{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[2m])) / sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[2m]))) and on (ttl, hop_ip) (sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[2m])) > 0), \"hop\", \" \", \"ttl\", \"hop_ip\"), \"ttl\", \"\", \"\", \"\"), \"hop_ip\", \"\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "G",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "label_join(group by (ttl, hop_ip, hop_host, hop_asn, hop_as_name) ((sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) > 0) * on (hop_ip) group_left (hop_host, hop_asn, hop_as_name) group by (hop_ip, hop_host, hop_asn, hop_as_name) (topk by (hop_ip) (1, group by (hop_ip, hop_host, hop_asn, hop_as_name) (pinglens_trace_hop_info{cluster=\"$cluster\", hop_host!=\"\"}) * 2 or group by (hop_ip, hop_host, hop_asn, hop_as_name) (pinglens_trace_hop_info{cluster=\"$cluster\"}))) or on (ttl, hop_ip) (sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) > 0)), \"hop\", \" \", \"ttl\", \"hop_ip\")",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "hop",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "ttl",
+                "hop_ip",
+                "hop_host",
+                "hop_asn",
+                "hop_as_name",
+                "Value #B",
+                "Value #A",
+                "Value #C",
+                "Value #D",
+                "Value #E",
+                "Value #F"
+              ]
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {
+              "ttl": 0,
+              "hop_ip": 1,
+              "hop_host": 2,
+              "hop_asn": 3,
+              "hop_as_name": 4,
+              "Value #B": 5,
+              "Value #A": 6,
+              "Value #C": 7,
+              "Value #D": 8,
+              "Value #E": 9,
+              "Value #F": 10
+            },
+            "renameByName": {
+              "ttl": "TTL",
+              "hop_ip": "Hop IP",
+              "hop_host": "Host",
+              "hop_asn": "ASN",
+              "hop_as_name": "AS name",
+              "Value #B": "Loss",
+              "Value #A": "Replies",
+              "Value #C": "Avg",
+              "Value #D": "p50",
+              "Value #E": "p95",
+              "Value #F": "Last 2m"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "TTL",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "state-timeline",
+      "title": "Path: responding IP per hop",
+      "description": "Which address answered at each TTL over time, colored by that TTL's loss in the step: green below 2%, yellow from 2%, red from 10%. Rows are TTL order; a new row at the same TTL is a path change. Loss is measured per TTL, so addresses sharing a TTL share its color. Red at one hop but not at later hops is ICMP rate limiting, not path loss.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.02
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
+            ]
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 0,
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "showValue": "never",
+        "mergeValues": true,
+        "rowHeight": 0.8,
+        "alignValue": "left",
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "label_replace((clamp(1 - sum by (ttl) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])) / sum by (ttl) (increase(pinglens_trace_probes_sent_total{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])), 0, 1) * on (ttl) group_right () ((sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])) > 0) * 0 + 1)) * on (hop_ip) group_left (hop_host) group by (hop_ip, hop_host) (topk by (hop_ip) (1, group by (hop_ip, hop_host) (pinglens_trace_hop_info{cluster=\"$cluster\", hop_host!=\"\"}) * 2 or group by (hop_ip, hop_host) (pinglens_trace_hop_info{cluster=\"$cluster\"}))) or on (ttl, hop_ip) (clamp(1 - sum by (ttl) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])) / sum by (ttl) (increase(pinglens_trace_probes_sent_total{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])), 0, 1) * on (ttl) group_right () ((sum by (ttl, hop_ip) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])) > 0) * 0 + 1)), \"_hop\", \"$1\", \"ttl\", \"(.*)\")",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{ttl}} {{hop_ip}} {{hop_host}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Destination latency and loss",
+      "description": "Mean RTT of the destination's replies, and the share of probes at the destination's TTLs without a reply.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "auto",
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "loss"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "bars"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 60
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(pinglens_trace_reply_rtt_seconds_sum{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval])) / sum(rate(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval]))",
+          "range": true,
+          "instant": false,
+          "legendFormat": "latency"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "1 - sum(rate(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval])) / sum(rate(pinglens_trace_probes_sent_total{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]) and on (ttl) (sum by (ttl) (rate(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval])) > 0))",
+          "range": true,
+          "instant": false,
+          "legendFormat": "loss"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Latency by hop",
+      "description": "Mean RTT per TTL and responding address. Click a legend entry to show one hop, Ctrl/Cmd-click to toggle more. Click a point to focus the dashboard on ±5 minutes around it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 30,
+        "w": 24,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "auto",
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "links": [
+            {
+              "title": "Focus ±5m here",
+              "url": "/d/pinglens-trace/pinglens-trace?${__all_variables}&time=${__value.time}&time.window=600000"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ],
+          "sortBy": "Name",
+          "sortDesc": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (ttl, hop_ip) (rate(pinglens_trace_reply_rtt_seconds_sum{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])) / sum by (ttl, hop_ip) (rate(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{ttl}} {{hop_ip}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Loss by hop",
+      "description": "Share of probes per TTL without a reply, for TTLs that answered in the selected range. Loss that appears at one hop but not at later hops is ICMP rate limiting, not path loss.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "auto",
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "min": 0,
+          "max": 1,
+          "links": [
+            {
+              "title": "Focus ±5m here",
+              "url": "/d/pinglens-trace/pinglens-trace?${__all_variables}&time=${__value.time}&time.window=600000"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "sortBy": "Name",
+          "sortDesc": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(1 - sum by (ttl) (rate(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval])) / sum by (ttl) (rate(pinglens_trace_probes_sent_total{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__rate_interval]))) and on (ttl) (sum by (ttl) (increase(pinglens_trace_reply_rtt_seconds_count{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\"}[$__range])) > 0)",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{ttl}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "heatmap",
+      "title": "Destination RTT distribution",
+      "description": "Replies from the destination per RTT bucket.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "calculate": false,
+        "cellGap": 1,
+        "color": {
+          "mode": "scheme",
+          "scheme": "Oranges",
+          "steps": 64,
+          "exponent": 0.5,
+          "fill": "dark-orange",
+          "reverse": false
+        },
+        "yAxis": {
+          "axisPlacement": "left",
+          "unit": "s",
+          "reverse": false
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "cellValues": {
+          "unit": "short"
+        },
+        "legend": {
+          "show": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "yHistogram": false,
+          "showColorScale": false
+        },
+        "filterValues": {
+          "le": 1e-09
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (le) (increase(pinglens_trace_reply_rtt_seconds_bucket{cluster=\"$cluster\", endpoint_fullname=\"$target\", ttl=~\"$ttl\", dest=\"true\"}[$__rate_interval]))",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{le}}",
+          "format": "heatmap"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Hops to destination",
+      "description": "TTL at which the destination answers; 0 while it is unreached.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "auto",
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max(pinglens_trace_destination_ttl{cluster=\"$cluster\", endpoint_fullname=\"$target\"})",
+          "range": true,
+          "instant": false,
+          "legendFormat": "hops"
+        }
+      ]
+    }
+  ]
+}
