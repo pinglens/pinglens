@@ -15,7 +15,6 @@ services:
       PINGLENS_MODE: coordinator
       PINGLENS_LISTEN: :8080
       PINGLENS_METRICS_LISTEN: :9090
-      PINGLENS_REGIONS: local
       PINGLENS_AGENT_TOKENS: local=dev-token
       PINGLENS_VALKEY_URL: redis://valkey:6379/0
       PINGLENS_PING_COUNT: 10

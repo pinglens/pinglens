@@ -299,7 +299,7 @@ func (v *valkeyStore) regionStatuses(ctx context.Context, cfg Config, now time.T
 
 func (v *valkeyStore) agentIDs(ctx context.Context, cfg Config) ([]string, error) {
 	seen := map[string]struct{}{}
-	ids := make([]string, 0, len(cfg.Regions)+len(cfg.AgentTokens))
+	ids := make([]string, 0, len(cfg.AgentTokens))
 	add := func(id string) {
 		id = strings.TrimSpace(id)
 		if id == "" {
@@ -310,9 +310,6 @@ func (v *valkeyStore) agentIDs(ctx context.Context, cfg Config) ([]string, error
 		}
 		seen[id] = struct{}{}
 		ids = append(ids, id)
-	}
-	for _, id := range cfg.Regions {
-		add(id)
 	}
 	tokenIDs := make([]string, 0, len(cfg.AgentTokens))
 	for id := range cfg.AgentTokens {

@@ -189,7 +189,7 @@ func TestCancelJobRejectsFurtherAgentEvents(t *testing.T) {
 }
 
 func TestUnauthorizedAgentRejected(t *testing.T) {
-	srv := newTestServer(t, Config{Regions: []string{"dfw1"}, AgentTokens: map[string]string{"dfw1": "secret"}})
+	srv := newTestServer(t, Config{AgentTokens: map[string]string{"dfw1": "secret"}})
 	body, _ := json.Marshal(protocol.AgentPollRequest{ClusterID: "dfw1", Version: protocol.Version})
 	req := httptest.NewRequest(http.MethodPost, "/api/agent/poll", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer wrong")
@@ -203,7 +203,7 @@ func TestUnauthorizedAgentRejected(t *testing.T) {
 func TestAgentConnectionLogsRejectedTokenHintWithoutSecret(t *testing.T) {
 	var log bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&log, nil))
-	srv := newTestServerWithLogger(t, Config{Regions: []string{"dfw1"}, AgentTokens: map[string]string{"dfw1": "secret"}}, logger)
+	srv := newTestServerWithLogger(t, Config{AgentTokens: map[string]string{"dfw1": "secret"}}, logger)
 	wrongToken := "wrong-agent-token"
 	body, _ := json.Marshal(protocol.AgentPollRequest{ClusterID: "dfw1", DisplayName: "DFW", Version: protocol.Version})
 	req := httptest.NewRequest(http.MethodPost, "/api/agent/poll", bytes.NewReader(body))

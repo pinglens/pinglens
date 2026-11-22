@@ -72,7 +72,6 @@ func runCoordinator(ctx context.Context, logger *slog.Logger) error {
 	cfg := coordinator.Config{
 		ListenAddr:             env("PINGLENS_LISTEN", ":8080"),
 		MetricsListenAddr:      env("PINGLENS_METRICS_LISTEN", ":9090"),
-		Regions:                splitCSV(os.Getenv("PINGLENS_REGIONS")),
 		AgentTokens:            parseTokens(os.Getenv("PINGLENS_AGENT_TOKENS")),
 		UI:                     ui,
 		PingCount:              envIntAllowZero("PINGLENS_PING_COUNT", 0),
@@ -109,7 +108,7 @@ func runCoordinator(ctx context.Context, logger *slog.Logger) error {
 
 	errCh := make(chan error, 2)
 	go func() {
-		logger.Info("starting coordinator", "listen", cfg.ListenAddr, "regions", strings.Join(cfg.Regions, ","))
+		logger.Info("starting coordinator", "listen", cfg.ListenAddr)
 		errCh <- httpServer.ListenAndServe()
 	}()
 	go func() {
