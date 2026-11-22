@@ -213,6 +213,35 @@ excludeTargets:
   - target_region: dfw
 ```
 
+### Exporter health
+
+These metrics describe the exporter itself, for dashboards of the exporter
+fleet, probing, targets and scrape cost.
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `pinglens_exporter_build_info` | gauge | `version`, `revision`, `goversion` | Always `1`; module version, VCS revision and Go version of the binary |
+| `pinglens_exporter_ready` | gauge | | `1` once warmed up, as `/readyz` reports |
+| `pinglens_exporter_warmup_seconds` | gauge | | Seconds from start until warmed up; absent before |
+| `pinglens_exporter_config_reloads_total` | counter | `result` | Loads of a changed config file: `applied`, `invalid` (parse failure, running config kept) or `error` (read failure) |
+| `pinglens_exporter_config_last_reload_success_timestamp_seconds` | gauge | | Unix time of the latest successful config load, including the one at startup |
+| `pinglens_exporter_targets` | gauge | | Configured targets |
+| `pinglens_exporter_targets_discovering` | gauge | | Targets whose path is not discovered yet |
+| `pinglens_exporter_targets_unresolved` | gauge | | Targets whose latest resolution failed or that have not resolved yet |
+| `pinglens_exporter_target_resolutions_total` | counter | `result` | `success` or `failure` of each DNS lookup of a hostname target (every five minutes, every 30 seconds while failing); an IP literal counts one `success` when its trace starts |
+| `pinglens_exporter_probe_outcomes_total` | counter | `outcome` | Probe outcomes across all targets: `reply` or `timeout` |
+| `pinglens_exporter_icmp_receive_errors_total` | counter | | Failed reads from the raw ICMP sockets |
+| `pinglens_exporter_icmp_unmatched_total` | counter | | Received ICMP messages that answer no pending probe: other ICMP traffic in the network namespace, and late or duplicate replies |
+| `pinglens_exporter_traces_failed_total` | counter | `reason` | Traces that could not start: `invalid_options`, `family_unavailable` or `no_echo_id` |
+| `pinglens_exporter_hop_names` | gauge | | Hop addresses in the name cache |
+| `pinglens_exporter_hop_name_lookups_pending` | gauge | | Hop addresses whose name lookups have not all settled |
+| `pinglens_exporter_hop_name_lookups_total` | counter | `kind`, `result` | Completed `ptr`, `asn` and `as_name` lookups: `success`, `not_found` (NXDOMAIN, NODATA or an unusable answer) or `error` |
+| `pinglens_exporter_hop_series` | gauge | | RTT histogram series in the scrape |
+| `pinglens_exporter_last_collect_duration_seconds` | gauge | | Wall time of the previous scrape's collection |
+
+`/metrics` also serves the Go runtime (`go_*`) and process (`process_*`)
+collectors.
+
 ## Grafana dashboards
 
 The [mixin](mixin/) builds two dashboards.

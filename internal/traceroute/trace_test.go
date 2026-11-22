@@ -310,6 +310,82 @@ func TestEchoReplyFromOtherAddressIgnored(t *testing.T) {
 	assertReplies(t, rec.replies, map[hopKey]int{{1, "192.0.2.9", true}: 1})
 }
 
+// TestDispatchCountsUnmatched covers each kind of message that answers no
+// pending probe; only the first matching reply goes uncounted.
+func TestDispatchCountsUnmatched(t *testing.T) {
+	path := newFakePath()
+	path.answers = func(int, int) bool { return false }
+	_, r, clock := newTestRunner(t, path, Options{Interval: time.Second, Timeout: 500 * time.Millisecond, MaxTTL: 2})
+	r.runRound(context.Background())
+	p := r.prober
+	reply := echoReply(t, r.id, encodeSeq(0, 1))
+	for _, step := range []struct {
+		name string
+		b    []byte
+		from netip.Addr
+		at   time.Duration
+		want uint64
+	}{
+		{"someone pinging us", echoRequest(t, r.id, encodeSeq(0, 1)), testDest, 0, 1},
+		{"unknown echo ID", echoReply(t, r.id+1, encodeSeq(0, 1)), testDest, 0, 2},
+		{"reply from another address", reply, netip.MustParseAddr("192.0.2.200"), 0, 3},
+		{"matching reply", reply, testDest, 0, 3},
+		{"duplicate reply", reply, testDest, 0, 4},
+		{"late reply", echoReply(t, r.id, encodeSeq(0, 2)), testDest, time.Second, 5},
+	} {
+		p.dispatch(step.b, step.from, clock.Now().Add(step.at))
+		if got := p.Stats().Unmatched; got != step.want {
+			t.Fatalf("after %s: unmatched = %d, want %d", step.name, got, step.want)
+		}
+	}
+}
+
+// TestTraceCountsFailures covers the three ways a trace cannot start.
+func TestTraceCountsFailures(t *testing.T) {
+	p := newProber(slog.New(slog.DiscardHandler), newFakePath(), nil)
+	opts := Options{Interval: time.Second, Timeout: 500 * time.Millisecond, MaxTTL: 4}
+	p.Trace(context.Background(), testDest.String(), Options{MaxTTL: 4}, Callbacks{})
+	p.Trace(context.Background(), testDest6.String(), opts, Callbacks{})
+	inUse := &runner{}
+	for id := range 1 << 16 {
+		p.runners[uint16(id)] = inUse
+	}
+	p.Trace(context.Background(), testDest.String(), opts, Callbacks{})
+
+	if got, want := p.Stats(), (ProberStats{InvalidOptions: 1, FamilyUnavailable: 1, NoEchoID: 1}); got != want {
+		t.Fatalf("stats = %+v, want %+v", got, want)
+	}
+}
+
+// TestReceiveCountsReadErrors covers failed reads; the close at shutdown
+// ends the loop uncounted.
+func TestReceiveCountsReadErrors(t *testing.T) {
+	c := &failingConn{errs: []error{errors.New("no buffer space"), errors.New("no buffer space")}}
+	p := newProber(slog.New(slog.DiscardHandler), c, nil)
+	p.start()
+	p.receivers.Wait()
+	if got := p.Stats().ReceiveErrors; got != 2 {
+		t.Fatalf("receive errors = %d, want 2", got)
+	}
+}
+
+// failingConn fails its first reads with errs, then reports itself closed.
+type failingConn struct {
+	errs []error
+}
+
+func (c *failingConn) Send([]byte, int, netip.Addr) error { return nil }
+func (c *failingConn) Close() error                       { return nil }
+
+func (c *failingConn) Recv([]byte) (int, netip.Addr, error) {
+	if len(c.errs) == 0 {
+		return 0, netip.Addr{}, net.ErrClosed
+	}
+	err := c.errs[0]
+	c.errs = c.errs[1:]
+	return 0, netip.Addr{}, err
+}
+
 func TestResolveKeepsCurrentAddress(t *testing.T) {
 	a, b := netip.MustParseAddr("192.0.2.9"), netip.MustParseAddr("192.0.2.10")
 	path := newFakePath()

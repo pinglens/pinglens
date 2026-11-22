@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/icmp"
@@ -90,7 +91,9 @@ type Callbacks struct {
 	// its address. Pending probes are discarded at a change.
 	OnTargetIP func(netip.Addr)
 	// OnTargetUp reports whether the latest resolution succeeded. A failure
-	// keeps probing the last address, if any.
+	// keeps probing the last address, if any. It fires once per resolution
+	// of a hostname, except one cut short by the trace stopping, and once at
+	// the start of a trace of an IP literal.
 	OnTargetUp func(bool)
 }
 
@@ -119,6 +122,40 @@ type Prober struct {
 	nextIndex uint16
 
 	receivers sync.WaitGroup
+
+	receiveErrors     atomic.Uint64
+	unmatched         atomic.Uint64
+	invalidOptions    atomic.Uint64
+	familyUnavailable atomic.Uint64
+	noEchoID          atomic.Uint64
+}
+
+// ProberStats counts a Prober's events since it was created.
+type ProberStats struct {
+	// ReceiveErrors counts failed socket reads other than the close at
+	// shutdown.
+	ReceiveErrors uint64
+	// Unmatched counts received ICMP messages that answer no pending probe:
+	// other programs' and hosts' ICMP traffic, including ICMPv6 neighbor
+	// discovery, and late, duplicate or misaddressed replies.
+	Unmatched uint64
+	// InvalidOptions, FamilyUnavailable and NoEchoID count traces that
+	// returned at once: without a positive interval and timeout, for an IP
+	// literal of a family without a socket, and with every echo ID in use.
+	InvalidOptions    uint64
+	FamilyUnavailable uint64
+	NoEchoID          uint64
+}
+
+// Stats returns the prober's event counts.
+func (p *Prober) Stats() ProberStats {
+	return ProberStats{
+		ReceiveErrors:     p.receiveErrors.Load(),
+		Unmatched:         p.unmatched.Load(),
+		InvalidOptions:    p.invalidOptions.Load(),
+		FamilyUnavailable: p.familyUnavailable.Load(),
+		NoEchoID:          p.noEchoID.Load(),
+	}
 }
 
 // NewProber opens the raw ICMP sockets and starts their receive loops.
@@ -196,17 +233,20 @@ func (p *Prober) connFor(addr netip.Addr) conn {
 // takes the first.
 func (p *Prober) Trace(ctx context.Context, host string, opts Options, cb Callbacks) {
 	if opts.Interval <= 0 || opts.Timeout <= 0 {
+		p.invalidOptions.Add(1)
 		p.logger.Error("trace needs a positive interval and timeout", "target", host)
 		return
 	}
 	literal, err := netip.ParseAddr(host)
 	isLiteral := err == nil
 	if isLiteral && !p.Supports(literal) {
+		p.familyUnavailable.Add(1)
 		p.logger.Error("trace target's address family is unavailable", "target", host)
 		return
 	}
 	r := p.newRunner(host, opts, cb)
 	if !p.register(r) {
+		p.noEchoID.Add(1)
 		p.logger.Error("no free ICMP echo ID", "target", host)
 		return
 	}
@@ -276,6 +316,7 @@ func (p *Prober) receive(c conn) {
 			if errors.Is(err, net.ErrClosed) {
 				return
 			}
+			p.receiveErrors.Add(1)
 			p.logger.Warn("ICMP receive failed", "error", err)
 			time.Sleep(10 * time.Millisecond)
 			continue
@@ -286,18 +327,20 @@ func (p *Prober) receive(c conn) {
 
 // dispatch routes one received ICMP message to the trace owning its echo ID.
 // A raw socket sees every ICMP packet in the network namespace, including
-// other pingers', so anything that does not match a pending probe is dropped.
+// other pingers', so anything that does not match a pending probe is dropped
+// and counted as unmatched.
 func (p *Prober) dispatch(b []byte, from netip.Addr, now time.Time) {
 	from = from.Unmap()
 	id, seq, origDst, quoted, ok := parseReply(b, from.Is6())
 	if !ok {
+		p.unmatched.Add(1)
 		return
 	}
 	p.mu.RLock()
 	r := p.runners[id]
 	p.mu.RUnlock()
-	if r != nil {
-		r.reply(seq, from, origDst, quoted, now)
+	if r == nil || !r.reply(seq, from, origDst, quoted, now) {
+		p.unmatched.Add(1)
 	}
 }
 
@@ -535,20 +578,20 @@ func (r *runner) runRound(ctx context.Context) {
 	}
 }
 
-// reply matches an answer to its pending probe. Late, duplicate and foreign
-// answers are ignored; a late probe stays pending until runRound expires it.
-// An echo reply must come from the target, and an error must quote a probe
-// sent to it.
-func (r *runner) reply(seq uint16, from, origDst netip.Addr, quoted bool, now time.Time) {
+// reply matches an answer to its pending probe and reports whether it found
+// one. Late, duplicate and foreign answers are ignored; a late probe stays
+// pending until runRound expires it. An echo reply must come from the
+// target, and an error must quote a probe sent to it.
+func (r *runner) reply(seq uint16, from, origDst netip.Addr, quoted bool, now time.Time) bool {
 	r.mu.Lock()
 	if !r.ip.IsValid() || (quoted && origDst != r.ip) || (!quoted && from != r.ip) {
 		r.mu.Unlock()
-		return
+		return false
 	}
 	probe, ok := r.pending[seq]
 	if !ok || now.Sub(probe.sent) > r.opts.Timeout {
 		r.mu.Unlock()
-		return
+		return false
 	}
 	delete(r.pending, seq)
 	ttl := seqTTL(seq)
@@ -571,6 +614,7 @@ func (r *runner) reply(seq uint16, from, origDst netip.Addr, quoted bool, now ti
 	for _, rep := range deliver {
 		call(r.cb.OnReply, rep)
 	}
+	return true
 }
 
 // settleLocked resolves the held replies of round after one of its probes

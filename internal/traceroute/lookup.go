@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinglens/pinglens/internal/target"
@@ -64,6 +65,41 @@ type HopNames struct {
 	mu      sync.Mutex
 	hops    map[netip.Addr]*hopEntry
 	asNames map[string]*asNameEntry
+
+	ptrLookups, asnLookups, asNameLookups lookupCounts
+}
+
+// LookupStats counts completed hop name lookups per kind: PTR names and
+// origin ASNs by address, and AS descriptions by ASN.
+type LookupStats struct {
+	PTR, ASN, ASName LookupResults
+}
+
+// LookupResults counts completed lookups by outcome: Success found a
+// record, NotFound got a missing record (NXDOMAIN, NODATA or an unusable
+// answer), and Error failed (timeout, SERVFAIL).
+type LookupResults struct {
+	Success, NotFound, Error uint64
+}
+
+type lookupCounts struct {
+	success, notFound, failed atomic.Uint64
+}
+
+// count records one lookup outcome, classified as store treats it.
+func (n *lookupCounts) count(value string, err error) {
+	switch {
+	case err != nil:
+		n.failed.Add(1)
+	case value == "":
+		n.notFound.Add(1)
+	default:
+		n.success.Add(1)
+	}
+}
+
+func (n *lookupCounts) load() LookupResults {
+	return LookupResults{Success: n.success.Load(), NotFound: n.notFound.Load(), Error: n.failed.Load()}
 }
 
 type hopEntry struct {
@@ -133,11 +169,11 @@ func (c *HopNames) Get(addr netip.Addr) (HopName, bool) {
 		c.hops[addr] = entry
 	}
 	entry.seen = now
-	c.refreshLocked(&entry.ptr, now, func(ctx context.Context) (string, error) {
+	c.refreshLocked(&entry.ptr, &c.ptrLookups, now, func(ctx context.Context) (string, error) {
 		return lookupHost(ctx, c.resolver, addr)
 	}, nil)
 	if !entry.noASN {
-		c.refreshLocked(&entry.asn, now, func(ctx context.Context) (string, error) {
+		c.refreshLocked(&entry.asn, &c.asnLookups, now, func(ctx context.Context) (string, error) {
 			return lookupASN(ctx, c.resolver, addr)
 		}, func(now time.Time) { c.touchASNameLocked(entry, now) })
 		c.touchASNameLocked(entry, now)
@@ -184,6 +220,19 @@ func (c *HopNames) Pending() int {
 		}
 	}
 	return n
+}
+
+// Len counts the addresses in the cache, including those unseen for the
+// retention period that the next Prune drops.
+func (c *HopNames) Len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.hops)
+}
+
+// Lookups returns the number of completed lookups per kind and outcome.
+func (c *HopNames) Lookups() LookupStats {
+	return LookupStats{PTR: c.ptrLookups.load(), ASN: c.asnLookups.load(), ASName: c.asNameLookups.load()}
 }
 
 // Prune drops hop and AS-name entries unseen for the retention period.
@@ -239,14 +288,15 @@ func (c *HopNames) touchASNameLocked(entry *hopEntry, now time.Time) {
 		c.asNames[asn] = as
 	}
 	as.seen = now
-	c.refreshLocked(&as.name, now, func(ctx context.Context) (string, error) {
+	c.refreshLocked(&as.name, &c.asNameLookups, now, func(ctx context.Context) (string, error) {
 		return lookupASName(ctx, c.resolver, asn)
 	}, nil)
 }
 
-// refreshLocked starts lookup for rec when it is due and none is in flight.
-// after runs with the cache locked once the outcome is stored.
-func (c *HopNames) refreshLocked(rec *cachedLookup, now time.Time, lookup func(context.Context) (string, error), after func(time.Time)) {
+// refreshLocked starts lookup for rec when it is due and none is in flight,
+// and counts its outcome in counts. after runs with the cache locked once
+// the outcome is stored.
+func (c *HopNames) refreshLocked(rec *cachedLookup, counts *lookupCounts, now time.Time, lookup func(context.Context) (string, error), after func(time.Time)) {
 	if rec.busy || now.Before(rec.retryAt) {
 		return
 	}
@@ -255,6 +305,7 @@ func (c *HopNames) refreshLocked(rec *cachedLookup, now time.Time, lookup func(c
 		c.slots <- struct{}{}
 		value, err := lookup(context.Background())
 		<-c.slots
+		counts.count(value, err)
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		done := c.now()

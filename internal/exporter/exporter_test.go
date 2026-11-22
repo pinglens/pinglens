@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -82,7 +83,7 @@ targets:
 			if got["target"] == "8.8.8.8" {
 				t.Fatalf("removed target still exported in %s", family.GetName())
 			}
-			if family.GetName() == metricHop {
+			if !strings.HasPrefix(family.GetName(), "pinglens_trace_") || family.GetName() == metricHop {
 				continue
 			}
 			if _, ok := got["endpoint_name"]; !ok {
@@ -299,6 +300,7 @@ type fakeTracer struct {
 	opts    map[string]traceroute.Options
 	done    map[string]bool
 	started chan string
+	stats   traceroute.ProberStats
 }
 
 func newFakeTracer() *fakeTracer {
@@ -320,6 +322,12 @@ func (f *fakeTracer) Trace(ctx context.Context, host string, opts traceroute.Opt
 	f.mu.Lock()
 	f.done[host] = true
 	f.mu.Unlock()
+}
+
+func (f *fakeTracer) Stats() traceroute.ProberStats {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.stats
 }
 
 func (f *fakeTracer) options(host string) traceroute.Options {
@@ -357,14 +365,19 @@ func (f *fakeTracer) stopped(host string) bool {
 }
 
 // fakeNames knows one router; with invalid set it also holds an AS name
-// that is not UTF-8. pending, when set, is what Pending reports.
+// that is not UTF-8. pending, when set, is what Pending reports; size and
+// lookups are what Len and Lookups report.
 type fakeNames struct {
 	invalid bool
 	pending *atomic.Int64
+	size    int
+	lookups traceroute.LookupStats
 }
 
 func (fakeNames) Get(netip.Addr) (traceroute.HopName, bool) { return traceroute.HopName{}, false }
 func (fakeNames) Prune()                                    {}
+func (f fakeNames) Len() int                                { return f.size }
+func (f fakeNames) Lookups() traceroute.LookupStats         { return f.lookups }
 func (f fakeNames) Pending() int {
 	if f.pending == nil {
 		return 0
