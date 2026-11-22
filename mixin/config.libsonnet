@@ -1,9 +1,9 @@
 {
   _config+:: {
-    // With showMultiCluster the dashboard selects one cluster through the
+    // With showMultiCluster the dashboards select one cluster through the
     // clusterLabel label, which the scraper adds to every series (for example
-    // as a Prometheus external label). Without it the dashboard has no
-    // cluster selector and reads every pinglens-exporter series.
+    // as a Prometheus external label). Without it the dashboards have no
+    // cluster selector and read every PingLens series.
     showMultiCluster: false,
     clusterLabel: 'cluster',
 
@@ -12,5 +12,15 @@
     datasourceRegex: '',
 
     dashboardTags: ['pinglens'],
+
+    // With showLogs the PingLens dashboard adds agent and coordinator log
+    // panels from a Loki data source, selecting each component's streams
+    // with these label matchers. The defaults match Kubernetes pod labels
+    // mapped to Loki labels with underscores.
+    showLogs: false,
+    logSelectors: {
+      agent: 'app_kubernetes_io_name="pinglens", app_kubernetes_io_component="agent"',
+      coordinator: 'app_kubernetes_io_name="pinglens", app_kubernetes_io_component="coordinator"',
+    },
   },
 }

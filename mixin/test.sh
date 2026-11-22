@@ -47,6 +47,33 @@ jq -e '.templating.list[] | select(.name == "cluster") | .query.query == "label_
 jq -e '.templating.list[] | select(.name == "datasource") | .regex == "/^prom$/"' "$work_dir/multi.json" > /dev/null ||
   fail "datasource regex not applied"
 
+# build_app CONFIG: the PingLens dashboard with CONFIG merged into _config.
+build_app() {
+  jsonnet -J "$mixin_dir" -e "((import 'mixin.libsonnet') + { _config+:: $1 }).grafanaDashboards['pinglens.json']"
+}
+
+build_app '{}' > "$work_dir/app-single.json"
+strings "$work_dir/app-single.json" | grep -q 'cluster' &&
+  fail "single-cluster PingLens dashboard still selects a cluster"
+jq -e '[.templating.list[].name] == ["datasource"]' "$work_dir/app-single.json" > /dev/null ||
+  fail "single-cluster PingLens dashboard variables are not datasource"
+jq -e '[.panels[] | select(.type == "logs")] == []' "$work_dir/app-single.json" > /dev/null ||
+  fail "PingLens dashboard has log panels without showLogs"
+
+build_app '{ showMultiCluster: true, clusterLabel: "k8s_cluster", showLogs: true, logSelectors: { agent: "job=\"agent\"", coordinator: "job=\"coordinator\"" } }' > "$work_dir/app-multi.json"
+strings "$work_dir/app-multi.json" | grep -Eq '(^|[^_])cluster=~?"' &&
+  fail "multi-cluster PingLens dashboard still uses the cluster label"
+strings "$work_dir/app-multi.json" | grep -q 'SELECTOR' &&
+  fail "PingLens dashboard log selector placeholders are left"
+jq -e '[.templating.list[].name] == ["datasource", "cluster", "log_datasource", "log_cluster"]' "$work_dir/app-multi.json" > /dev/null ||
+  fail "multi-cluster PingLens dashboard variables are not datasource, cluster, log_datasource, log_cluster"
+jq -e '[.panels[] | select(.type == "logs")] | length == 2' "$work_dir/app-multi.json" > /dev/null ||
+  fail "PingLens dashboard has no agent and coordinator log panels with showLogs"
+strings "$work_dir/app-multi.json" | grep -Fq '{k8s_cluster=~"$log_cluster", job="agent"}' ||
+  fail "agent log query does not select the log clusters and the agent selector"
+strings "$work_dir/app-multi.json" | grep -Fq '{k8s_cluster="$cluster", job="coordinator"}' ||
+  fail "coordinator log query does not select the cluster and the coordinator selector"
+
 if [ -n "$output" ]; then
   mkdir -p "$output"
   jsonnet -J "$mixin_dir" -m "$output" "$mixin_dir/dashboards.jsonnet" > /dev/null

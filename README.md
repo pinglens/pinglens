@@ -213,10 +213,17 @@ excludeTargets:
   - target_region: dfw
 ```
 
-## Grafana dashboard
+## Grafana dashboards
 
-The [mixin](mixin/) builds the **PingLens Trace** dashboard: a hop table for
-the selected range, the responding address per hop over time, destination
+The [mixin](mixin/) builds two dashboards.
+
+**PingLens** shows the coordinator: online regions and agent pods, running
+tests against the concurrency limits, the create rate against its limits, and
+test and event throughput. With `showLogs` it adds agent and coordinator log
+panels from a Loki data source.
+
+**PingLens Trace** shows one pinglens-exporter target: a hop table for the
+selected range, the responding address per hop over time, destination
 latency and loss, latency and loss per hop, and the destination RTT
 distribution. It selects targets by the chart's `group_title` and
 `endpoint_fullname` labels. The percentile columns and the RTT distribution
@@ -229,13 +236,18 @@ local pinglens = (import 'github.com/pinglens/pinglens/mixin/mixin.libsonnet') +
   _config+:: {
     showMultiCluster: true,  // select one cluster by clusterLabel
     clusterLabel: 'cluster',
+    showLogs: true,  // Loki labels selecting each component's streams
+    logSelectors: {
+      agent: 'app_kubernetes_io_name="pinglens", app_kubernetes_io_component="agent"',
+      coordinator: 'app_kubernetes_io_name="pinglens", app_kubernetes_io_component="coordinator"',
+    },
   },
 };
 pinglens.grafanaDashboards
 ```
 
-Each release also attaches the dashboard built with the default config
-(single cluster) as `pinglens-trace.json`.
+Each release also attaches both dashboards built with the default config
+(single cluster, no log panels) as `pinglens.json` and `pinglens-trace.json`.
 
 ## Development
 
