@@ -41,6 +41,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check pinglens README is generated
+        run: |
+          go install github.com/norwoodj/helm-docs/cmd/helm-docs@v1.14.2
+          helm-docs --chart-search-root charts --chart-to-generate charts/pinglens
+          git diff --exit-code charts/pinglens/README.md
       - name: Lint pinglens
         run: |
           helm repo add valkey https://valkey.io/valkey-helm/

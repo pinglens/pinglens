@@ -1,44 +1,67 @@
 image:
+  # -- Image repository for the coordinator and agents
   repository: ghcr.io/pinglens/pinglens
+  # -- Image pull policy
   pullPolicy: IfNotPresent
-  # Defaults to the chart's appVersion, the release the chart was built for.
+  # -- Image tag
+  # @default -- the chart's `appVersion`
   tag: ""
 
+# -- Image pull secrets for the coordinator and agent pods
 imagePullSecrets: []
+# -- Overrides the chart name in resource names and labels
 nameOverride: ""
+# -- Overrides the full resource name prefix
 fullnameOverride: ""
 
 branding:
+  # -- Name shown in the UI
   appName: PingLens
+  # -- Operator name shown in the UI
   providerName: ""
+  # -- Link for the operator name
   providerURL: ""
+  # -- Operator icon URL
   providerLogoURL: ""
-  # Optional UI palette overrides as hex colors (e.g. "#2563eb").
-  # Empty values keep PingLens' built-in defaults.
+  # UI palette overrides as hex colors (e.g. "#2563eb"). Empty values keep
+  # PingLens' built-in colors.
   theme:
+    # -- Primary accent color
     accent: ""
+    # -- Secondary accent color
     accentSecondary: ""
+    # -- Page background color
     background: ""
 
 serviceAccount:
+  # -- Create a ServiceAccount
   create: true
+  # -- ServiceAccount annotations
   annotations: {}
+  # -- ServiceAccount name
+  # @default -- the full name when `create` is true, otherwise `default`
   name: ""
 
-# Annotations on the coordinator and agent Deployments themselves, for
-# tools that read their settings from Deployment metadata.
+# -- Annotations on the coordinator and agent Deployments, for tools that read
+# their settings from Deployment metadata
 annotations: {}
+# -- Annotations on the coordinator and agent pods
 podAnnotations: {}
+# -- Labels on the coordinator and agent pods
 podLabels: {}
 
+# -- Pod security context for the coordinator and agents
 podSecurityContext: {}
 
+# -- Coordinator container security context
 securityContext:
   allowPrivilegeEscalation: false
   capabilities:
     drop:
       - ALL
 
+# -- Agent container security context. Agents run as root with `NET_RAW` to
+# open raw ICMP sockets.
 agentSecurityContext:
   runAsUser: 0
   runAsGroup: 0
@@ -51,118 +74,210 @@ agentSecurityContext:
       - ALL
 
 service:
+  # -- Create the coordinator UI and API Service
   enabled: true
+  # -- Service type
   type: ClusterIP
+  # -- Service port, also the coordinator's container port
   port: 8080
+  # -- Service annotations
   annotations: {}
+  # -- External traffic policy, applied when `type` is `LoadBalancer`
   externalTrafficPolicy: ""
+  # -- Load balancer IP
   loadBalancerIP: ""
+  # -- CIDRs allowed to reach the load balancer
   loadBalancerSourceRanges: []
 
 metricsService:
+  # -- Create the coordinator metrics Service
   enabled: true
+  # -- Service type
   type: ClusterIP
+  # -- Service port, also the coordinator's metrics container port
   port: 9090
+  # -- Service annotations
   annotations: {}
 
 agentService:
+  # -- Create an extra coordinator Service for agents, e.g. a load balancer
+  # that agents in other clusters connect to
   enabled: false
+  # -- Suffix appended to the coordinator name for the Service name
   name: agent
+  # -- Service type
   type: ClusterIP
+  # -- Service port
   port: 8080
+  # -- Service annotations
   annotations: {}
+  # -- External traffic policy, applied when `type` is `LoadBalancer`
   externalTrafficPolicy: ""
+  # -- Load balancer IP
   loadBalancerIP: ""
+  # -- CIDRs allowed to reach the load balancer
   loadBalancerSourceRanges: []
 
 ingress:
+  # -- Create an Ingress for the coordinator UI and API
   enabled: false
+  # -- Ingress class name
   className: ""
+  # -- Ingress labels
   labels: {}
+  # -- Ingress annotations
   annotations: {}
+  # -- Ingress hosts, each a `host` with `paths` of `path` and `pathType`;
+  # required when the Ingress is enabled
   hosts: []
+  # -- Ingress TLS configuration
   tls: []
 
 serviceMonitor:
+  # -- Create a Prometheus Operator ServiceMonitor for the coordinator metrics
   enabled: false
+  # -- ServiceMonitor labels
   labels: {}
+  # -- Scrape interval
   interval: 30s
+  # -- Scrape timeout
   scrapeTimeout: 10s
 
+# -- Container resources for the coordinator and agents
 resources: {}
+# -- Node selector for the coordinator and agents
 nodeSelector: {}
+# -- Tolerations for the coordinator and agents
 tolerations: []
+# -- Affinity for the coordinator and agents, unless `coordinator.affinity` or
+# `agent.affinity` is set
 affinity: {}
+
+# Values for the [Valkey chart](https://github.com/valkey-io/valkey-helm),
+# which stores coordinator state. Valkey deploys with the coordinator; set
+# `enabled: false` and configure `stateStore` to use an existing Valkey.
 valkey:
   # enabled:
   auth:
+    # -- Require a Valkey password
     enabled: false
   dataStorage:
+    # -- Persist Valkey data to a volume
     enabled: false
   replica:
+    # -- Run Valkey replicas
     enabled: false
+    # -- Valkey replica count
     replicas: 1
     service:
+      # -- Create a Service for the Valkey replicas
       enabled: false
     persistence:
+      # -- Valkey replica volume size
       size: ""
 
 stateStore:
+  # -- Valkey URL, e.g. `redis://valkey:6379/0`
+  # @default -- the bundled Valkey when `valkey.enabled` is not `false`
   url: ""
+  # -- Valkey Sentinel addresses, used instead of `url`
   sentinelAddrs: []
+  # -- Valkey Sentinel primary name
   sentinelMaster: myprimary
+  # -- Key prefix
   prefix: pinglens
   passwordSecret:
+    # -- Secret holding the Valkey password
     name: ""
+    # -- Key in the Secret
     key: password
 
 coordinator:
+  # -- Deploy the coordinator, which serves the UI and API and queues tests
+  # for agents
   enabled: true
+  # -- Coordinator replicas
   replicaCount: 1
+  # -- Coordinator affinity
+  # @default -- `affinity`
   affinity: {}
+  # -- UI and API listen address
   listen: ":8080"
+  # -- Metrics listen address
   metricsListen: ":9090"
+  # -- Agent IDs shown first in the UI, in this order; other agents follow
   regions: []
+  # -- Pings per test; `0` pings for the whole test
   pingCount: 0
+  # -- Time between pings
   pingInterval: 1s
+  # -- How long a ping waits for its reply
   pingTimeout: 3s
+  # -- How long a test runs
   jobDuration: 10m
-  # Agents trace each job's target continuously: one probe per hop every
-  # traceInterval, each waiting up to traceTimeout (below traceInterval), up
-  # to traceMaxTTL hops (at most 31). The rolling hop table is reported every
-  # traceReportInterval and kept with the job's events.
+  # -- Time between trace rounds; each round probes every hop once
   traceInterval: 1s
+  # -- How long a trace probe waits; shorter than `traceInterval`
   traceTimeout: 900ms
+  # -- Farthest hop traced (1-31)
   traceMaxTTL: 30
+  # -- How often agents send the hop table, which is kept with the test's
+  # events
   traceReportInterval: 5s
+  # -- Tests created per window, in total
   globalCreateRateLimit: 120
+  # -- Tests created per window, per target
   targetCreateRateLimit: 30
+  # -- Tests created per window, per client
   clientCreateRateLimit: 20
+  # -- Rate limit window
   createRateWindow: 1m
+  # -- Running tests, in total
   globalConcurrencyLimit: 100
+  # -- Running tests per target
   targetConcurrencyLimit: 25
+  # -- Running tests per client
   clientConcurrencyLimit: 10
+  # -- Agent long-poll duration
   agentPollTimeout: 30s
+  # -- Time without a poll before an agent shows offline
   agentOnlineTimeout: 45s
+  # -- How long finished results stay viewable
   jobRetention: 15m
+  # -- Tests queued per agent
   maxQueuedJobsPerAgent: 16
   agentTokensSecret:
+    # -- Secret holding agent credentials as `id=token,id=token`
     name: ""
+    # -- Key in the Secret
     key: agent-tokens
 
 agent:
+  # -- Deploy an agent, which runs tests for one region
   enabled: false
+  # -- Agent replicas
   replicaCount: 1
+  # -- Agent affinity
+  # @default -- `affinity`
   affinity: {}
+  # -- Region ID, a key in the coordinator's agent tokens
   id: ""
+  # -- Region name shown in the UI
   displayName: ""
+  # -- Coordinator base URL
   coordinatorURL: ""
+  # -- Wait after a failed poll
   pollBackoff: 2s
   tokenSecret:
+    # -- Secret holding the agent's token
     name: ""
+    # -- Key in the Secret
     key: token
 
+  # -- Agent pod DNS policy
   dnsPolicy: ""
+  # -- Agent pod DNS configuration
   dnsConfig: {}
 
+# -- Extra environment variables for the coordinator and agent containers
 extraEnv: []
