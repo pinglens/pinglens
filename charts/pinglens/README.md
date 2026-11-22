@@ -6,7 +6,6 @@ PingLens regional ping and MTR-style path testing service
 
 ```sh
 helm install pinglens oci://ghcr.io/pinglens/charts/pinglens --version 0.1.0 \
-  --set 'coordinator.regions={dfw}' \
   --set coordinator.agentTokensSecret.name=pinglens-agent-tokens
 ```
 
@@ -77,7 +76,6 @@ or `stateStore.sentinelAddrs`.
 | coordinator.pingCount | int | `0` | Pings per test; `0` pings for the whole test |
 | coordinator.pingInterval | string | `"1s"` | Time between pings |
 | coordinator.pingTimeout | string | `"3s"` | How long a ping waits for its reply |
-| coordinator.regions | list | `[]` | Agent IDs shown first in the UI, in this order; other agents follow |
 | coordinator.replicaCount | int | `1` | Coordinator replicas |
 | coordinator.targetConcurrencyLimit | int | `25` | Running tests per target |
 | coordinator.targetCreateRateLimit | int | `30` | Tests created per window, per target |

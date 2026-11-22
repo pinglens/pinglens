@@ -6,7 +6,6 @@
 
 ```sh
 helm install pinglens oci://ghcr.io/pinglens/charts/pinglens --version 0.1.0 \
-  --set 'coordinator.regions={dfw}' \
   --set coordinator.agentTokensSecret.name=pinglens-agent-tokens
 ```
 

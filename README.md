@@ -53,7 +53,6 @@ starts Valkey, a coordinator and one local agent; open
 
 ```sh
 helm install pinglens oci://ghcr.io/pinglens/charts/pinglens --version 0.1.0 \
-  --set 'coordinator.regions={dfw}' \
   --set coordinator.agentTokensSecret.name=pinglens-agent-tokens
 ```
 
@@ -74,7 +73,6 @@ Coordinator:
 | `PINGLENS_LISTEN` | `:8080` | UI and API listen address |
 | `PINGLENS_METRICS_LISTEN` | `:9090` | Prometheus metrics listen address |
 | `PINGLENS_AGENT_TOKENS` | | Agent credentials, `id=token,id=token` |
-| `PINGLENS_REGIONS` | | Agent IDs shown first in the UI, in this order; other agents follow |
 | `PINGLENS_VALKEY_URL` | | Valkey URL, e.g. `redis://valkey:6379/0` |
 | `PINGLENS_VALKEY_SENTINEL_ADDRS` | | Sentinel addresses, comma-separated, used instead of the URL |
 | `PINGLENS_VALKEY_SENTINEL_MASTER` | `myprimary` | Sentinel primary name |

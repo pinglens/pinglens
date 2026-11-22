@@ -205,8 +205,6 @@ coordinator:
   listen: ":8080"
   # -- Metrics listen address
   metricsListen: ":9090"
-  # -- Agent IDs shown first in the UI, in this order; other agents follow
-  regions: []
   # -- Pings per test; `0` pings for the whole test
   pingCount: 0
   # -- Time between pings

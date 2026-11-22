@@ -21,7 +21,6 @@ import (
 type Config struct {
 	ListenAddr             string
 	MetricsListenAddr      string
-	Regions                []string
 	AgentTokens            map[string]string
 	UI                     http.Handler
 	PingCount              int
@@ -400,7 +399,7 @@ func (s *Server) regionStatusesLocked(now time.Time) []protocol.Region {
 }
 
 func (s *Server) agentIDsLocked() []string {
-	seen := make(map[string]struct{}, len(s.cfg.Regions)+len(s.cfg.AgentTokens)+len(s.agents))
+	seen := make(map[string]struct{}, len(s.cfg.AgentTokens)+len(s.agents))
 	ids := make([]string, 0, len(seen))
 	add := func(id string) {
 		id = strings.TrimSpace(id)
@@ -412,9 +411,6 @@ func (s *Server) agentIDsLocked() []string {
 		}
 		seen[id] = struct{}{}
 		ids = append(ids, id)
-	}
-	for _, id := range s.cfg.Regions {
-		add(id)
 	}
 	tokenIDs := make([]string, 0, len(s.cfg.AgentTokens))
 	for id := range s.cfg.AgentTokens {

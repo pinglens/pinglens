@@ -25,7 +25,6 @@ data:
   PINGLENS_THEME_BACKGROUND: {{ .Values.branding.theme.background | quote }}
   PINGLENS_LISTEN: {{ .Values.coordinator.listen | quote }}
   PINGLENS_METRICS_LISTEN: {{ .Values.coordinator.metricsListen | quote }}
-  PINGLENS_REGIONS: {{ join "," .Values.coordinator.regions | quote }}
   PINGLENS_PING_COUNT: {{ .Values.coordinator.pingCount | quote }}
   PINGLENS_PING_INTERVAL: {{ .Values.coordinator.pingInterval | quote }}
   PINGLENS_PING_TIMEOUT: {{ .Values.coordinator.pingTimeout | quote }}
