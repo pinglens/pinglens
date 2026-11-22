@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -52,15 +53,16 @@ var hopInfoDesc = prometheus.NewDesc(metricHop,
 // label names follow the configuration file and may change at any reload.
 func (e *Exporter) Describe(chan<- *prometheus.Desc) {}
 
-// Collect builds every series from the current target states. All targets
-// share one label set, target plus the union of their configured label
-// names, so each metric family has consistent label names; a target without
-// a label exports it empty.
+// Collect builds every series from the current target states, then the
+// exporter health metrics. All targets share one label set, target plus the
+// union of their configured label names, so each metric family has
+// consistent label names; a target without a label exports it empty.
 //
 // Target state is copied under its lock and the metrics are built and sent
 // after releasing it: the receive goroutine needs the same locks to record
 // replies, and a stall there would add to the RTT of queued replies.
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
+	start := time.Now()
 	states := e.states()
 	targets := make([]targetSnapshot, len(states))
 	keySet := map[string]bool{}
@@ -84,13 +86,15 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 
 	// An invalid series (such as a label value that is not UTF-8) is logged
 	// and dropped rather than failing the scrape or panicking in Gather.
-	send := func(m prometheus.Metric, err error) {
+	send := func(m prometheus.Metric, err error) bool {
 		if err != nil {
 			e.logger.Error("drop invalid metric", "err", err)
-			return
+			return false
 		}
 		ch <- m
+		return true
 	}
+	hopSeries := 0
 	for _, t := range targets {
 		values := make([]string, 0, len(base))
 		values = append(values, t.host)
@@ -105,9 +109,11 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 			}
 		}
 		for _, hop := range t.hops {
-			send(prometheus.NewConstNativeHistogram(rttDesc, hop.series.count, hop.series.sum, hop.series.buckets, nil,
+			if send(prometheus.NewConstNativeHistogram(rttDesc, hop.series.count, hop.series.sum, hop.series.buckets, nil,
 				hop.series.zero, rttSchema, prometheus.DefNativeHistogramZeroThreshold, hop.series.created,
-				withValues(ttlLabel(hop.key.ttl), hop.key.ip.String(), strconv.FormatBool(hop.key.dest))...))
+				withValues(ttlLabel(hop.key.ttl), hop.key.ip.String(), strconv.FormatBool(hop.key.dest))...)) {
+				hopSeries++
+			}
 		}
 		send(prometheus.NewConstMetric(destDesc, prometheus.GaugeValue, float64(t.destTTL), values...))
 		send(prometheus.NewConstMetric(upDesc, prometheus.GaugeValue, boolValue(t.up), values...))
@@ -121,6 +127,9 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	e.names.Range(func(addr netip.Addr, name traceroute.HopName) {
 		send(prometheus.NewConstMetric(hopInfoDesc, prometheus.GaugeValue, 1, addr.String(), name.Host, name.ASN, name.ASName))
 	})
+
+	e.collectHealth(send, targets, hopSeries)
+	e.stats.collectDuration.Store(int64(time.Since(start)))
 }
 
 // targetSnapshot is a copy of one target's state for a scrape.

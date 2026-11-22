@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/pinglens/pinglens/internal/traceroute"
@@ -32,18 +33,22 @@ const (
 	maxWarmup = 5 * time.Minute
 )
 
-// Tracer runs one continuous trace until ctx is cancelled;
-// *traceroute.Prober implements it.
+// Tracer runs one continuous trace until ctx is cancelled and counts the
+// events of all traces; *traceroute.Prober implements it.
 type Tracer interface {
 	Trace(ctx context.Context, host string, opts traceroute.Options, cb traceroute.Callbacks)
+	Stats() traceroute.ProberStats
 }
 
-// HopNamer annotates hop addresses; *traceroute.HopNames implements it.
+// HopNamer annotates hop addresses and counts its cache and lookups;
+// *traceroute.HopNames implements it.
 type HopNamer interface {
 	Get(addr netip.Addr) (traceroute.HopName, bool)
 	Range(fn func(netip.Addr, traceroute.HopName))
 	Pending() int
 	Prune()
+	Len() int
+	Lookups() traceroute.LookupStats
 }
 
 // Exporter runs one trace per configured target and collects their state as
@@ -60,6 +65,7 @@ type Exporter struct {
 	// names they found are looked up; see checkWarm.
 	warm    atomic.Bool
 	started time.Time
+	stats   counters
 
 	mu      sync.Mutex
 	cfg     Config
@@ -79,7 +85,7 @@ func New(logger *slog.Logger, path string, tracer Tracer, names HopNamer) (*Expo
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	return &Exporter{
+	e := &Exporter{
 		logger:  logger,
 		path:    path,
 		tracer:  tracer,
@@ -88,7 +94,10 @@ func New(logger *slog.Logger, path string, tracer Tracer, names HopNamer) (*Expo
 		cfg:     cfg,
 		sum:     sha256.Sum256(data),
 		targets: map[string]*targetState{},
-	}, nil
+	}
+	e.stats.lastReload.Store(e.now().UnixNano())
+	e.stats.collectDuration.Store(-1)
+	return e, nil
 }
 
 // Run starts every target's trace and re-reads the configuration file every
@@ -146,16 +155,18 @@ func (e *Exporter) checkWarm() bool {
 	if (discovering > 0 || pending > 0) && elapsed < maxWarmup {
 		return false
 	}
+	e.stats.warmup.Store(int64(elapsed))
 	e.warm.Store(true)
 	e.logger.Info("warmed up", "after", elapsed.Round(time.Second), "discovering_targets", discovering, "pending_hop_names", pending)
 	return true
 }
 
-// Handler serves /metrics from a registry holding only this exporter's
-// metrics, /healthz once traces are running, and /readyz once warm.
+// Handler serves /metrics from a registry holding this exporter's metrics
+// and the Go runtime and process collectors, /healthz once traces are
+// running, and /readyz once warm.
 func (e *Exporter) Handler() http.Handler {
 	reg := prometheus.NewRegistry()
-	reg.MustRegister(e)
+	reg.MustRegister(e, collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -183,6 +194,7 @@ func (e *Exporter) Handler() http.Handler {
 func (e *Exporter) reload() {
 	data, err := os.ReadFile(e.path)
 	if err != nil {
+		e.stats.reloadsFailed.Add(1)
 		e.logger.Error("read config", "path", e.path, "err", err)
 		return
 	}
@@ -196,6 +208,7 @@ func (e *Exporter) reload() {
 	cfg, err := ParseConfig(data)
 	if err != nil {
 		e.mu.Unlock()
+		e.stats.reloadsInvalid.Add(1)
 		e.logger.Error("invalid config; keeping the running one", "path", e.path, "err", err)
 		return
 	}
@@ -230,6 +243,8 @@ func (e *Exporter) reload() {
 	}
 	e.cfg = cfg
 	e.mu.Unlock()
+	e.stats.reloadsApplied.Add(1)
+	e.stats.lastReload.Store(e.now().UnixNano())
 
 	for _, state := range removed {
 		state.stop()
@@ -250,7 +265,7 @@ func (e *Exporter) startLocked(t Target) {
 	opts := e.cfg.options()
 	e.wg.Go(func() {
 		defer close(state.done)
-		e.tracer.Trace(ctx, t.Host, opts, state.callbacks(e.names, e.now))
+		e.tracer.Trace(ctx, t.Host, opts, state.callbacks(e.names, e.now, &e.stats))
 	})
 }
 
@@ -314,9 +329,10 @@ type targetState struct {
 	hops     map[hopKey]*hopSeries
 }
 
-func (s *targetState) callbacks(names HopNamer, now func() time.Time) traceroute.Callbacks {
+func (s *targetState) callbacks(names HopNamer, now func() time.Time, stats *counters) traceroute.Callbacks {
 	return traceroute.Callbacks{
 		OnReply: func(r traceroute.Reply) {
+			stats.replies.Add(1)
 			names.Get(r.From)
 			key := hopKey{ttl: r.TTL, ip: r.From, dest: r.Dest}
 			seconds := r.RTT.Seconds()
@@ -339,6 +355,7 @@ func (s *targetState) callbacks(names HopNamer, now func() time.Time) traceroute
 			s.mu.Unlock()
 		},
 		OnTimeout: func(ttl int) {
+			stats.timeouts.Add(1)
 			at := now()
 			s.mu.Lock()
 			s.countSentLocked(ttl, at)
@@ -355,6 +372,11 @@ func (s *targetState) callbacks(names HopNamer, now func() time.Time) traceroute
 			s.mu.Unlock()
 		},
 		OnTargetUp: func(up bool) {
+			if up {
+				stats.resolveSuccess.Add(1)
+			} else {
+				stats.resolveFailure.Add(1)
+			}
 			s.mu.Lock()
 			s.up = up
 			s.mu.Unlock()
@@ -362,17 +384,22 @@ func (s *targetState) callbacks(names HopNamer, now func() time.Time) traceroute
 	}
 }
 
-// discovered reports whether the trace has found its path. Every round ends
-// with one outcome at TTL 1, so the third such outcome comes two intervals
-// after round 1 began, past round 1's timeout: round 1 has seen every hop
-// that answers and asked for its name. A target that has not resolved yet is
-// undiscovered, whether its lookup is slow or failed: the engine retries
-// failed resolutions, and maxWarmup bounds the wait for one that never
-// succeeds.
+// discovered reports whether the trace has found its path; see pathFound.
 func (s *targetState) discovered() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.sent[1] >= 3
+	return pathFound(s.sent[1])
+}
+
+// pathFound reports whether a trace with ttl1 outcomes at TTL 1 has found
+// its path. Every round ends with one outcome at TTL 1, so the third such
+// outcome comes two intervals after round 1 began, past round 1's timeout:
+// round 1 has seen every hop that answers and asked for its name. A target
+// that has not resolved yet is undiscovered, whether its lookup is slow or
+// failed: the engine retries failed resolutions, and maxWarmup bounds the
+// wait for one that never succeeds.
+func pathFound(ttl1 uint64) bool {
+	return ttl1 >= 3
 }
 
 func (s *targetState) countSentLocked(ttl int, at time.Time) {

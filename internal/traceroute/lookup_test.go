@@ -181,6 +181,40 @@ func TestHopNamesSettleAfterFailingFor90s(t *testing.T) {
 	}
 }
 
+// TestHopNamesCountLookups covers counting each completed lookup by kind
+// and result: a record is a success, NXDOMAIN is not_found, and a resolver
+// that never answers is an error.
+func TestHopNamesCountLookups(t *testing.T) {
+	dns, names, clock := newTestHopNames(t)
+	dns.set(privatePTR, ptr("gw1.example.net."))
+	lookup(t, names, privateHop)
+
+	// Origin AS found, its description unanswered.
+	dns.nxdomain("4.4.8.8.in-addr.arpa.")
+	dns.set("4.4.8.8.origin.asn.cymru.com.", txt("64500 | 8.8.4.0/24 | US | arin | 2023-12-28"))
+	lookup(t, names, netip.MustParseAddr("8.8.4.4"))
+	// No origin AS, so no description lookup.
+	dns.nxdomain("8.8.8.8.in-addr.arpa.")
+	dns.nxdomain("8.8.8.8.origin.asn.cymru.com.")
+	lookup(t, names, netip.MustParseAddr("8.8.8.8"))
+
+	dns.drop(privatePTR)
+	clock.Advance(answerLifetime)
+	lookup(t, names, privateHop)
+
+	want := LookupStats{
+		PTR:    LookupResults{Success: 1, NotFound: 2, Error: 1},
+		ASN:    LookupResults{Success: 1, NotFound: 1},
+		ASName: LookupResults{Error: 1},
+	}
+	if got := names.Lookups(); got != want {
+		t.Fatalf("lookups = %+v, want %+v", got, want)
+	}
+	if n := names.Len(); n != 3 {
+		t.Fatalf("cache holds %d addresses, want 3", n)
+	}
+}
+
 func TestJitterLifetimeSpreadsWithinBounds(t *testing.T) {
 	lo, hi := time.Duration(float64(time.Hour)*(1-lifetimeJitter)), time.Duration(float64(time.Hour)*(1+lifetimeJitter))
 	minSeen, maxSeen := hi, lo
