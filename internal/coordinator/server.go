@@ -240,7 +240,6 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeMetrics(w http.ResponseWriter, cfg Config, snapshot metricsSnapshot) {
-	fmt.Fprintf(w, "# TYPE pinglens_agents gauge\npinglens_agents %d\n", snapshot.AgentIDsOnline)
 	fmt.Fprintf(w, "# TYPE pinglens_agent_ids_online gauge\npinglens_agent_ids_online %d\n", snapshot.AgentIDsOnline)
 	fmt.Fprintf(w, "# TYPE pinglens_agent_instances_online gauge\npinglens_agent_instances_online %d\n", snapshot.AgentInstancesOnline)
 	agentIDs := make([]string, 0, len(snapshot.AgentInstancesByID))
@@ -252,30 +251,19 @@ func writeMetrics(w http.ResponseWriter, cfg Config, snapshot metricsSnapshot) {
 	for _, id := range agentIDs {
 		fmt.Fprintf(w, "pinglens_agent_instances{agent_id=%s} %d\n", prometheusLabelValue(id), snapshot.AgentInstancesByID[id])
 	}
-	fmt.Fprintf(w, "# TYPE pinglens_jobs_created_total counter\npinglens_jobs_created_total %d\n", snapshot.JobsCreated)
+	fmt.Fprintf(w, "# TYPE pinglens_sessions_created_total counter\npinglens_sessions_created_total %d\n", snapshot.JobsCreated)
 	fmt.Fprintf(w, "# TYPE pinglens_events_total counter\npinglens_events_total %d\n", snapshot.EventsSeen)
-	fmt.Fprintf(w, "# TYPE pinglens_jobs_active gauge\npinglens_jobs_active %d\n", snapshot.ActiveJobs)
-	fmt.Fprintf(w, "# TYPE pinglens_jobs_active_unique_clients gauge\npinglens_jobs_active_unique_clients %d\n", snapshot.ActiveClients)
-	fmt.Fprintf(w, "# TYPE pinglens_jobs_active_unique_targets gauge\npinglens_jobs_active_unique_targets %d\n", snapshot.ActiveTargets)
 	fmt.Fprintf(w, "# TYPE pinglens_sessions_active gauge\npinglens_sessions_active %d\n", snapshot.ActiveJobs)
 	fmt.Fprintf(w, "# TYPE pinglens_sessions_active_unique_clients gauge\npinglens_sessions_active_unique_clients %d\n", snapshot.ActiveClients)
 	fmt.Fprintf(w, "# TYPE pinglens_sessions_active_unique_targets gauge\npinglens_sessions_active_unique_targets %d\n", snapshot.ActiveTargets)
 	fmt.Fprintf(w, "# TYPE pinglens_sessions_global_concurrency_limit gauge\npinglens_sessions_global_concurrency_limit %d\n", cfg.GlobalConcurrencyLimit)
 	fmt.Fprintf(w, "# TYPE pinglens_sessions_client_concurrency_limit gauge\npinglens_sessions_client_concurrency_limit %d\n", cfg.ClientConcurrencyLimit)
 	fmt.Fprintf(w, "# TYPE pinglens_sessions_target_concurrency_limit gauge\npinglens_sessions_target_concurrency_limit %d\n", cfg.TargetConcurrencyLimit)
-	fmt.Fprintf(w, "# TYPE pinglens_jobs_global_concurrency_limit gauge\npinglens_jobs_global_concurrency_limit %d\n", cfg.GlobalConcurrencyLimit)
-	fmt.Fprintf(w, "# TYPE pinglens_jobs_client_concurrency_limit gauge\npinglens_jobs_client_concurrency_limit %d\n", cfg.ClientConcurrencyLimit)
-	fmt.Fprintf(w, "# TYPE pinglens_jobs_target_concurrency_limit gauge\npinglens_jobs_target_concurrency_limit %d\n", cfg.TargetConcurrencyLimit)
-	fmt.Fprintf(w, "# TYPE pinglens_jobs_create_rate_current gauge\npinglens_jobs_create_rate_current %d\n", snapshot.GlobalRateCurrent)
 	fmt.Fprintf(w, "# TYPE pinglens_sessions_create_rate_current gauge\npinglens_sessions_create_rate_current %d\n", snapshot.GlobalRateCurrent)
 	fmt.Fprintln(w, "# TYPE pinglens_sessions_create_rate_limit gauge")
 	fmt.Fprintf(w, "pinglens_sessions_create_rate_limit{scope=\"global\"} %d\n", cfg.GlobalCreateRateLimit)
 	fmt.Fprintf(w, "pinglens_sessions_create_rate_limit{scope=\"client\"} %d\n", cfg.ClientCreateRateLimit)
 	fmt.Fprintf(w, "pinglens_sessions_create_rate_limit{scope=\"target\"} %d\n", cfg.TargetCreateRateLimit)
-	fmt.Fprintln(w, "# TYPE pinglens_jobs_create_rate_limit gauge")
-	fmt.Fprintf(w, "pinglens_jobs_create_rate_limit{scope=\"global\"} %d\n", cfg.GlobalCreateRateLimit)
-	fmt.Fprintf(w, "pinglens_jobs_create_rate_limit{scope=\"client\"} %d\n", cfg.ClientCreateRateLimit)
-	fmt.Fprintf(w, "pinglens_jobs_create_rate_limit{scope=\"target\"} %d\n", cfg.TargetCreateRateLimit)
 }
 
 func prometheusLabelValue(value string) string {

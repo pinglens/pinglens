@@ -288,9 +288,15 @@ func TestMetricsOnlyServedByMetricsHandler(t *testing.T) {
 		"pinglens_sessions_active 1",
 		"pinglens_sessions_active_unique_clients 1",
 		"pinglens_sessions_active_unique_targets 1",
+		"pinglens_sessions_created_total 1",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("missing metric %q in:\n%s", want, output)
+		}
+	}
+	for _, removed := range []string{"pinglens_jobs_", "pinglens_agents "} {
+		if strings.Contains(output, removed) {
+			t.Fatalf("metric %q is served:\n%s", removed, output)
 		}
 	}
 }

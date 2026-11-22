@@ -114,6 +114,28 @@ Agent:
 
 Both read `PINGLENS_LOG_LEVEL` (`debug`, `info`, `warn`, `error`).
 
+### Metrics
+
+The coordinator serves Prometheus metrics on `PINGLENS_METRICS_LISTEN`:
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `pinglens_agent_ids_online` | gauge | | Regions with at least one online agent |
+| `pinglens_agent_instances_online` | gauge | | Online agent pods across all regions |
+| `pinglens_agent_instances` | gauge | `agent_id` | Online agent pods per region |
+| `pinglens_sessions_created_total` | counter | | Tests created through this coordinator instance |
+| `pinglens_events_total` | counter | | Test events agents reported to this coordinator instance |
+| `pinglens_sessions_active` | gauge | | Running tests |
+| `pinglens_sessions_active_unique_clients` | gauge | | Client addresses with a running test |
+| `pinglens_sessions_active_unique_targets` | gauge | | Targets with a running test |
+| `pinglens_sessions_global_concurrency_limit`, `pinglens_sessions_client_concurrency_limit`, `pinglens_sessions_target_concurrency_limit` | gauge | | Concurrency limits in effect |
+| `pinglens_sessions_create_rate_current` | gauge | | Tests created in the current rate window, in total |
+| `pinglens_sessions_create_rate_limit` | gauge | `scope` | Create rate limits in effect (`global`, `client`, `target`) |
+
+The gauges describe the shared state in Valkey, so every coordinator replica
+reports the same values; the counters are per instance, so sum them across
+replicas.
+
 ## pinglens-exporter
 
 ![PingLens Trace dashboard: hop table, responding address per hop over time, and destination latency and loss](docs/images/pinglens-trace-dashboard.png)
