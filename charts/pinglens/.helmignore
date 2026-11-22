@@ -2,3 +2,4 @@
 .gitignore
 .gitlab-ci.yml
 pinglens-*.tgz
+README.md.gotmpl

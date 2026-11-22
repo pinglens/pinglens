@@ -58,8 +58,8 @@ helm install pinglens oci://ghcr.io/pinglens/charts/pinglens --version 0.1.0 \
 ```
 
 Run each region's agent with `coordinator.enabled=false`, `agent.enabled=true`,
-`agent.id`, `agent.coordinatorURL` and `agent.tokenSecret`; see the chart's
-[`values.yaml`](charts/pinglens/values.yaml).
+`agent.id`, `agent.coordinatorURL` and `agent.tokenSecret`; the chart's
+[README](charts/pinglens/README.md) lists every value.
 
 ### Configuration
 
@@ -222,6 +222,7 @@ Each release also attaches the dashboard built with the default config
 ```sh
 go vet ./... && go test -race ./...
 node --test web/*.test.js
+helm-docs --chart-search-root charts --chart-to-generate charts/pinglens
 sh charts/pinglens-exporter/tests/test.sh
 sh mixin/test.sh   # needs jsonnet, jsonnetfmt and jq
 ```
